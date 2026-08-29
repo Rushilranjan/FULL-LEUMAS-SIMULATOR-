@@ -1,0 +1,136 @@
+Leumas simulator plan:
+
+
+1.1) Simulator plan 
+Im using an stm32f767zi nucleo board 
+I will be using an external push bottom 
+Im using a zero pcb board 
+The zero pcb layout is as follows 
+Mcu on the left 
+Screen in the middle 
+And module around it 
+Led strip in btw the modules and display 
+And led inside the modules 
+
+The push botton will be used to cycle through 4 hard coded sequences
+
+The led i mentioned inside the module will hv to glow in fixed intervals depending on the plan 
+The led will hv to generate 4 colors 
+Green-qa/qc
+Yellow- goods in transfer (flashing)
+Red- module inactive 
+Blue- module running 
+
+The led strip in btw module and display will the indication of which modules hv finished their tasks so hard coded led no. Will light up as and when those modules finish 
+And then after all modules are done it will do a swipe animation from module to module x and keep swiping for certain amount of time to signify production of 1 lot is complete 
+
+I will explain everything in details ask me as many questions as needed 
+
+The modules I'll be using :
+Solid line: macro(upto 2), Gravimetric,blender and packaging 
+Liquid line : macro (upto2),reaction vessels ,bottling module 
+
+
+The hard coded sequences 
+
+Sequence 1 
+Activated when push button is clicked one after the mcu is reseted or once after the mcu is powered 
+
+This is solid sequence 1: macro 1in slot 1 turns green when mcu u powered signifying qa/qc is done and it's read for production then gets activated first runs for 20 seconds ( which means the led must glow blue no) parallelly Gravimetric in slot number 3 has to do the same thing 
+And once these both r done the robot in the android display must move from macro 1 to blender 1 in slot 4 and then Gravimetric does the same as above 
+So when material is being transferred from module to module both modules must flash yellow saying transfer in progress 
+Once both Gravimetric and macro dump to blender blender runs for 20 seconds ( same light sequence)
+And then materials transfer from blender to packaging module in slot 6 
+
+So when each module finishes the led strip in btw modules and display must become solid white till that module 
+This happens till the blender and once blender finishes the robot cannot show motion of transfer of blender to packaging module so the led strip btw these modules has to swipe(sequentially)white to show transfer for abt 10 seconds 
+And the packing module and blender led inside will pulse yellow to say transfer in progress 
+
+And after transfer the packing module become blue for 20 seconds to show paching is happening and led strip till packing module ins solid white to indicate till packaging module 
+And once this is done the led strip from this module to exit most keep swiping to indicate bottles are sent out of packaging 
+
+This is just a small introduction of a big project 
+Ask me as many questions u want and any suggestions u want especially with colors for led inside the module and the strip behavior 
+
+Sequence 2 is basically increasing number of macro and blender 
+And main objective is 
+1 increase production by increasing modules 
+2 increase production by looping lots
+
+So think abt this and come with a plan 
+
+
+And the android app for robot will be controlled by mcu via Bluetooth 
+Let's get to the android app later 
+First let's figure out the module plan
+
+
+WS2812B 5V Addressable RGB Non-Waterproof LED Strip Light 30 LED’s/Mtr – 1 Meter this is my led strip 
+for the the simualtor 
+
+and for the led inside my modules will be WS2812B single led or a single led ( with 4 individually led legs )
+
+
+sequnce 1 and 2 is for solid and they are the top line of modules 
+
+and sequence 3 and 4 is for liquid and is the bottom line
+ 
+
+1.2) simulator plan 
+
+a basic implementation of my requirement is complete but my main objective still remain the same: 1) imcrease production by increasing number of modules 2) increase production by looping 3) must be understandable by a stupid person aswell ( this is the most important step )
+
+
+so I was thinking why not make it simple 
+lets keep the bottle neck as blender for sequence 1, so we will have 2 macros 1 gravimetric, so robot will collect from macro1 and dump to blender 1 and then once blender 1 finishes it sends everything to pachaging module, and only then material in macro 2 can be cleared and put in blender 1 again and then gravimetric to blender so this sequence will show that a module is waiting for blender as that is a bottleneck so in sequence 2 what we can do is just add another blender(blwndrer2) so the sequence will be as follows macro 1 to blender 1 gravimetric to blender 1, macro2 to blender 2 gravimetric to blender2, blender 1 and 2 to packaging, this shows increase in production by increasing number of modules 
+
+and coming to the lights 
+whenerver a module runs its solid green 
+whener transfer btw 2 modules happen make them solid yellow
+whenever a module is idle make them solid red  
+whenever a module is waiting due to bottleneck pulse yellow 
+
+The robot android app is yet to be developed but it must follow my architecture
+
+
+1.3) the led strip 
+
+-the led under the modules must light up once the module is completely done( when I mean completelty done that means the robot is done with its transfer from that specifiv module to where it was supposed to go to )
+-and also the led strip upto the module must light up  not just the led under it.
+- with this approach there is a problem tho,in sequence 1 macro 1 finishes so light up macro 1 can light up, but the light upto blender can onlt light up once the gravimetric and macro2 are done.
+- the swipe animation is only from blender to packager and from packager to exit 
+- the swipe animation is as follows if there are 10 led to swipe then swipe from 1-10 first and then make led 1 solid and swipe from 2-10 and then make led 2 solid, and continue 
+- in sequence 2 the swipe animation from blender 1 to packager is its own swipe and blender 2 to packager is its own swipe. And once the swipe from blender 1 to packager Is done the led strip until blender 2 can be solid.
+
+1.4) 
+-im not using ws218b individual led anymore for the modules ill be using a led strip, the same kind of strip as the one btw screen and module 
+ill provide the indexes for both strips once soldered 6
+
+
+1.5)
+-sequence 3 is skipped for now ( that's looping lots)
+- sequence 4 is basically the liquid line, the logic is same solid line we will have 2 liquid macros, 1 reaction vessel and 1 bottling module
+  sequence 4 is as follows , macro 1 to vessel 1 and then macro 2 to vessel 1(obviously its waiting for vessel 1 to be emptied),vessel 1 to bottling module (animation swipe ), bottling module to exit(again swipe)
+-sequence 5 is as follows:macro 1 to vessel 1 , maacro 2 to vessel 2 , vessel 1 to bottling module, vessel 2 to bottling module (obvisously both have their own swipe animation)bottling module to exit(animatiuon swipe)
+
+follow the same rules or led strip, nd for mdoules as sequence 1 and 2 
+
+
+
+1.6) LED STRIP:
+
+- MODULE LED AND STATUS LED ARE THE SAME STEIP OF LEDS, THEY ARE CONNECTED TO Pb4( DATA LINE)
+- observations made:  1) once the board is powered on led index g23 to g25 randomly flicker until reset is hit.
+                      2) led index btw g23 to g35 randomly fire along with other indexes
+                      3) after g35 the led don't glow.
+
+
+
+
+
+
+
+
+
+
+

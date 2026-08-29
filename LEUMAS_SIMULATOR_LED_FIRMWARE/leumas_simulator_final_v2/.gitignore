@@ -1,0 +1,9 @@
+# STM32CubeIDE build output
+/Debug/
+/Release/
+
+# Editor / OS cruft
+*.bak
+*~
+.DS_Store
+Thumbs.db
