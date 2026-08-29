@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Stylised palletiser: pedestal, turret, swan-neck arm, level forearm. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- base plate -->
+    <path
+        android:fillColor="#1E1E1E"
+        android:pathData="M34,80h40v5h-40z" />
+    <!-- pedestal -->
+    <path
+        android:fillColor="#2A2A2A"
+        android:pathData="M42,68h24v12h-24z" />
+    <!-- slewing ring -->
+    <path
+        android:fillColor="#E6E6E4"
+        android:pathData="M40,64h28v4h-28z" />
+    <!-- turret -->
+    <path
+        android:fillColor="#C41E24"
+        android:pathData="M44,52h20v12h-20z" />
+    <!-- counterweight drum -->
+    <path
+        android:fillColor="#1E1E1E"
+        android:pathData="M64,54h8v8h-8z" />
+    <!-- swan-neck lower arm -->
+    <path
+        android:fillColor="#C41E24"
+        android:pathData="M50,52l6,-24l7,2l-6,22z" />
+    <!-- upper arm -->
+    <path
+        android:fillColor="#C41E24"
+        android:pathData="M56,28l-18,-6l2,-6l18,6z" />
+    <!-- level forearm -->
+    <path
+        android:fillColor="#C41E24"
+        android:pathData="M38,22h-12v6h12z" />
+    <!-- end effector -->
+    <path
+        android:fillColor="#1E1E1E"
+        android:pathData="M22,20h6v10h-6z" />
+    <!-- chrome tie rod -->
+    <path
+        android:fillColor="#C8CDD2"
+        android:pathData="M52,32l-16,-5l1,-3l16,5z" />
+</vector>
