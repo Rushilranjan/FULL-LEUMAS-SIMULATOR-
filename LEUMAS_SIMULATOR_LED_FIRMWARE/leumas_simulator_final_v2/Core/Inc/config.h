@@ -119,10 +119,17 @@ extern const SlotLeds SLOT_LEDS[MODULE_COUNT];
  * target - coming fully to rest at the via point, which does not read as slow
  * and graceful in 20 s. Timings.DEFAULT_ROBOT_ANIMATION_MS is 40 s and this is
  * its firmware-side account of the same carry; the two must move together.
- * Lengthening only loosens both _Static_asserts in solid_seq1.c. */
+ * Lengthening only loosens both _Static_asserts in solid_seq1.c.
+ *
+ * DUMP carries 2 s more than COLLECTION so the carry is 42 s against a 40 s
+ * animation. That 2 s is the jitter margin change 12.2 introduced: the app
+ * animates one MOVE for the full carry, so with the two exactly equal the
+ * next cue can land a render-tick before the arm reaches home, which queues a
+ * transfer and triggers the catch-up speed-up mid-rotation. The slack has to
+ * sit on this side because the animation length is fixed by requirement 15.2. */
 #define SS1_INITIAL_PROCESS_MS   10000u  /* Module 2 + 3 both running at start */
 #define SS1_COLLECTION_MS        20000u  /* robot collecting from a module     */
-#define SS1_DUMP_MS              20000u  /* robot dumping into the blender     */
+#define SS1_DUMP_MS              22000u  /* robot dumping into the blender     */
 
 /* ---- Windows the requirement leaves open. Tune freely. ------------------- */
 /* How far into the macro -> blender dump the gravimetric finishes and goes

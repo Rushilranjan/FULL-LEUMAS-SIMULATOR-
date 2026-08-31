@@ -25,9 +25,11 @@ object Timings {
     /**
      * `SS1_DUMP_MS` - the robot pouring that material into the blender.
      *
-     * Second half of one carry. The pour animation (13.8) is paced against this.
+     * Second half of one carry. The pour animation (13.8) is paced against this. Carries 2 s
+     * more than [COLLECTION_MS]: that is the jitter margin (change 12.2), parked on the dump
+     * because requirement 15.2 fixes the animation length.
      */
-    const val DUMP_MS = 20_000L
+    const val DUMP_MS = 22_000L
 
     /**
      * One complete carry: `SS1_COLLECTION_MS + SS1_DUMP_MS`.
@@ -36,9 +38,9 @@ object Timings {
      * all this app's animation - and therefore also the spacing between consecutive `MOVE` cues.
      * Replaces the deleted `TRANSFER_ROBOT_MS`.
      *
-     * It is exactly [DEFAULT_ROBOT_ANIMATION_MS], not comfortably above it: the firmware now
-     * accounts for the same 40 s this app animates, so the old ~2 s of slack no longer exists on
-     * the firmware side. [MAX_CATCHUP_FACTOR] absorbs render-tick and UART jitter instead.
+     * 42 s against a 40 s [DEFAULT_ROBOT_ANIMATION_MS], restoring the ~2 s of slack change 12.2
+     * introduced. With the two exactly equal the next cue can arrive a render-tick before the
+     * arm reaches home, queueing a transfer and triggering [MAX_CATCHUP_FACTOR] mid-rotation.
      */
     const val CARRY_MS = COLLECTION_MS + DUMP_MS
 
@@ -80,8 +82,7 @@ object Timings {
     /**
      * Ceiling on how much the animation may be sped up to catch up with a queued transfer.
      *
-     * Kept gentle: with the animation now exactly at the firmware budget rather than under it, this
-     * is also what absorbs render-tick and UART jitter, so a real backlog stays rare and shallow. A
+     * Kept gentle: the animation sits ~2 s under the firmware carry, so a real backlog is rare. A
      * low cap means that when one does happen the arm speeds up smoothly rather than lurching. It
      * degrades to "a little brisker", never to a teleport (spec 10).
      */

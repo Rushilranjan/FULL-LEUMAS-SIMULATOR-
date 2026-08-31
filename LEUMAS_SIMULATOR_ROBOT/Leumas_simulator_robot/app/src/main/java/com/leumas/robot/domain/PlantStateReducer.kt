@@ -18,7 +18,7 @@ object PlantStateReducer {
         /*
          * A sequence start is DESTRUCTIVE, not additive.
          *
-         * `lotmgr_start()` wipes every lot on the firmware side, and pressing the button mid-run
+         * `solid_seq1_start()` resets everything on the firmware side, and pressing the button mid-run
          * re-emits SEQ:n without gracefully unwinding the previous run. So everything we believed
          * about module states and any in-flight transfer is now stale. The animation controller is
          * aborted separately by the caller.
@@ -68,14 +68,19 @@ object PlantStateReducer {
         )
 
         /*
-         * Fires at the START of the 10 s exit swipe, not at its end — the firmware sends nothing
+         * Solid Sequence 1 sends this once per CYCLE - four times per run - so it advances the
+         * progress bar a segment rather than filling it. stageIndex resets with it so the next
+         * cycle first RUN starts the fill from the beginning again.
+         *
+         * Fires at the START of the exit flow, not at its end — the firmware sends nothing
          * when the swipe finishes. Callers that want the on-screen completion to land with the
          * physical strip should hold for EXIT_SWIPE_MS after this.
          */
         is McuEvent.LotDone -> state.copy(
             lotComplete = true,
             currentTransfer = null,
-            cycleProgress = CycleProgress.finish(state.cycleProgress),
+            cycleProgress = CycleProgress.completeCycle(state.cycleProgress),
+            stageIndex = -1,
         )
 
         is McuEvent.Unknown -> state

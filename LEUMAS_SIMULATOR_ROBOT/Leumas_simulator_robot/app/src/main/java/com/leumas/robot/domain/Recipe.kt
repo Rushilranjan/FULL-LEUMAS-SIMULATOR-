@@ -15,14 +15,16 @@ data class RecipeStage(
  * What a sequence actually makes, mirrored from the firmware.
  *
  * Change 13.6 asks for a "recipe received" card whenever the board button selects a new sequence.
- * The MCU only ever sends `SEQ:<n>` — it has no recipe message and the spec forbids inventing one —
+ * The MCU only ever sends `SEQ:<n>` - it has no recipe message and the spec forbids inventing one -
  * so the recipe is held here, keyed by sequence number. This is the same pattern
  * [com.leumas.robot.protocol.SlotMap] and [com.leumas.robot.protocol.Timings] already use: static
  * rig knowledge mirrored from the firmware so the app can describe what it is watching, while the
  * MCU stays the sole source of truth for *when* anything happens.
  *
- * Mirrors `SOLID_RECIPE` / `LIQUID_RECIPE` in `App/lotmgr.c` and the `SEQ*_ACTIVE_MASK` /
- * `SOLID_LOTS_PER_RUN` constants in `Core/Inc/config.h`. If those change, change this.
+ * Mirrors `App/solid_seq1.c` and the `SS1_*` constants in `Core/Inc/config.h`. The firmware rewrite
+ * replaced the lot manager with a single hardcoded sequence, so sequences 2, 4 and 5 no longer
+ * exist - `seq` accepts only 1 - and the liquid line has no sequence at all yet. The liquid slot
+ * map is still in the firmware config awaiting one; add its recipe here when it lands.
  */
 data class Recipe(
     val sequence: Int,
@@ -32,72 +34,47 @@ data class Recipe(
     val stages: List<RecipeStage>,
     val activeSlots: List<Int>,
 ) {
-    /** "MACRO 1 + MACRO 2 + GRAVIMETRIC -> BLENDER 1 -> PACKAGING", for the recipe card. */
+    /** "MACRO + GRAVIMETRIC  ->  BLENDER  ->  PACKAGING", for the recipe card. */
     val chain: String get() = stages.joinToString("  ->  ") { it.label }
 
     companion object {
 
         /**
-         * Batches the firmware pushes per button press (`SOLID_LOTS_PER_RUN`).
+         * Complete production cycles per run, mirroring `SS1_CYCLES`.
          *
-         * This is the cycle count the progress bar renders (change 13.7). The definition of a
-         * "cycle" is still to be settled against the firmware, so it is deliberately one constant
-         * and one function ([CycleProgress.advance]) rather than being spread through the reducer.
+         * This is the segment count the progress bar renders (change 13.7). Solid Sequence 1 runs
+         * four cycles and then parks; it never rolls into a fifth on its own.
          */
-        const val BATCHES_PER_RUN = 2
+        const val CYCLES_PER_RUN = 4
 
-        private val SOLID_STAGES = listOf(
-            RecipeStage("MACRO + GRAVIMETRIC", listOf(1, 2, 3)),
-            RecipeStage("BLENDER", listOf(4, 5)),
+        /**
+         * Solid Sequence 1 drives slots 2, 3, 5 and 6 only - `SS1_SLOT_*` in `Core/Inc/config.h`,
+         * which are 0-based there and land on these 1-based wire slots. Slot 1 (Macro 1) and slot 4
+         * (Blender 1) are deliberately not used by this sequence.
+         */
+        private val SS1_STAGES = listOf(
+            RecipeStage("MACRO + GRAVIMETRIC", listOf(2, 3)),
+            RecipeStage("BLENDER", listOf(5)),
             RecipeStage("PACKAGING", listOf(6)),
-        )
-
-        private val LIQUID_STAGES = listOf(
-            RecipeStage("LIQUID MACRO", listOf(7, 8)),
-            RecipeStage("VESSEL", listOf(9, 10)),
-            RecipeStage("BOTTLING", listOf(11)),
         )
 
         val ALL: Map<Int, Recipe> = linkedMapOf(
             1 to Recipe(
                 sequence = 1,
-                name = "SOLID LINE - SINGLE BLENDER",
-                lesson = "One blender serves both batches, so the second waits.",
+                name = "SOLID SEQUENCE 1",
+                lesson = "Four cycles: macro and gravimetric are blended, packaged and shipped, " +
+                    "with the feeders recharging in the gaps.",
                 line = ProductionLine.SOLID,
-                stages = SOLID_STAGES,
-                activeSlots = listOf(1, 2, 3, 4, 6),
-            ),
-            2 to Recipe(
-                sequence = 2,
-                name = "SOLID LINE - TWO BLENDERS",
-                lesson = "A second blender removes the wait; both batches run in parallel.",
-                line = ProductionLine.SOLID,
-                stages = SOLID_STAGES,
-                activeSlots = listOf(1, 2, 3, 4, 5, 6),
-            ),
-            4 to Recipe(
-                sequence = 4,
-                name = "LIQUID LINE - SINGLE VESSEL",
-                lesson = "One vessel serves both batches, so the second waits.",
-                line = ProductionLine.LIQUID,
-                stages = LIQUID_STAGES,
-                activeSlots = listOf(7, 8, 9, 11),
-            ),
-            5 to Recipe(
-                sequence = 5,
-                name = "LIQUID LINE - TWO VESSELS",
-                lesson = "A second vessel removes the wait; both batches run in parallel.",
-                line = ProductionLine.LIQUID,
-                stages = LIQUID_STAGES,
-                activeSlots = listOf(7, 8, 9, 10, 11),
+                stages = SS1_STAGES,
+                activeSlots = listOf(2, 3, 5, 6),
             ),
         )
 
         /**
          * Recipe for a sequence number, or null if the MCU announced one we do not know.
          *
-         * `SEQ_CYCLE` walks 1 -> 2 -> 4 -> 5, and sequence 3 (continuous looping) is deferred in the
-         * firmware, so anything else is genuinely unexpected and the card is simply not shown.
+         * Only sequence 1 exists in the firmware today. An unknown number is shown as-is elsewhere
+         * rather than discarded, but there is no card to draw for it.
          */
         fun forSequence(sequence: Int): Recipe? = ALL[sequence]
     }
@@ -107,7 +84,7 @@ data class Recipe(
  * How far through the run the plant is, for the bottom-centre progress bar (change 13.7).
  *
  * [cycleCount] segments are drawn; [currentCycle] is 1-based. Everything here is derived from
- * observed MCU cues — no clock, no prediction (spec §13).
+ * observed MCU cues - no clock, no prediction (spec 13).
  */
 data class CycleProgress(
     val cycleCount: Int,
@@ -126,21 +103,22 @@ data class CycleProgress(
     companion object {
 
         fun start(recipe: Recipe?): CycleProgress = CycleProgress(
-            cycleCount = if (recipe == null) 0 else Recipe.BATCHES_PER_RUN,
+            cycleCount = if (recipe == null) 0 else Recipe.CYCLES_PER_RUN,
             currentCycle = 1,
             fraction = 0f,
         )
 
         /**
-         * Advance on a `RUN:<slot>` cue.
+         * Advance the fill *within* the current cycle on a `RUN:<slot>` cue.
          *
-         * A cycle here is one pass down the recipe stage chain: entering a stage moves the fill to
-         * that stage boundary, and entering a stage at or before the current one means the next
-         * batch has started down the chain, so the segment advances.
+         * Deliberately does NOT decide when a cycle ends. An earlier version inferred that from the
+         * stage order wrapping backwards, which Solid Sequence 1 breaks: `S_PACK_FINISH` re-runs the
+         * blender (stage 1) *after* packaging has already started (stage 2), so every cycle contains
+         * a legitimate backwards step and the heuristic counted two cycles for each real one.
+         * `LOT:DONE` is an exact, unambiguous per-cycle delimiter, so [completeCycle] owns that.
          *
-         * **This rule is provisional** — the user is settling the definition of a cycle against the
-         * firmware. It is intentionally the only place that decides, so changing it to "one full
-         * sequence repeat" or "one recipe stage" is a local edit.
+         * The fraction is monotonic within a cycle for the same reason - it takes the furthest stage
+         * reached, so the bar never slides backwards when the blender picks up again.
          */
         fun advance(
             current: CycleProgress?,
@@ -148,29 +126,34 @@ data class CycleProgress(
             slot: Int,
             previousStage: Int,
         ): Pair<CycleProgress, Int> {
-            if (recipe == null || current == null) return (current ?: CycleProgress(0, 1, 0f)) to previousStage
+            if (recipe == null || current == null) {
+                return (current ?: CycleProgress(0, 1, 0f)) to previousStage
+            }
             val stage = recipe.stages.indexOfFirst { slot in it.slots }
             if (stage < 0) return current to previousStage
 
-            // Strictly *earlier*, not "same or earlier": a stage can hold several modules running
-            // in parallel (Macro 1 + Macro 2 + Gravimetric all report RUN for stage 0), and treating
-            // the second of those as a wrap jumped the bar straight to the last cycle the moment a
-            // sequence started.
-            val wrapped = previousStage >= 0 && stage < previousStage
-            val cycle = if (wrapped) {
-                (current.currentCycle + 1).coerceAtMost(current.cycleCount.coerceAtLeast(1))
-            } else {
-                current.currentCycle
-            }
             val fraction = (stage + 1).toFloat() / recipe.stages.size
-            return current.copy(currentCycle = cycle, fraction = fraction) to stage
+            return current.copy(
+                fraction = maxOf(current.fraction, fraction),
+                complete = false,
+            ) to maxOf(stage, previousStage)
         }
 
-        /** The lot shipped: everything is full. */
-        fun finish(current: CycleProgress?): CycleProgress? = current?.copy(
-            currentCycle = current.cycleCount.coerceAtLeast(1),
-            fraction = 1f,
-            complete = true,
-        )
+        /**
+         * One cycle shipped, on `LOT:DONE`.
+         *
+         * The firmware sends this once per cycle - four times per run - not once per run, and sends
+         * nothing at all when the fourth finishes. So the last cycle completing is the only signal
+         * that the whole run is over.
+         */
+        fun completeCycle(current: CycleProgress?): CycleProgress? {
+            if (current == null) return null
+            val last = current.currentCycle >= current.cycleCount
+            return if (last) {
+                current.copy(fraction = 1f, complete = true)
+            } else {
+                current.copy(currentCycle = current.currentCycle + 1, fraction = 0f, complete = false)
+            }
+        }
     }
 }
