@@ -10,16 +10,16 @@
 const ModType MODULE_TYPES[MODULE_COUNT] = {
     /* --- Solid line (top row, slots 1..6) --- */
     T_MACRO,        /* slot 1  Macro1 */
-    T_MACRO,        /* slot 2  Macro2 (used in Seq 2) */
+    T_MACRO,        /* slot 2  Macro2 = "Module 2" (Solid Seq 1 macro) */
     T_GRAVIMETRIC,  /* slot 3  Gravimetric */
     T_BLENDER,      /* slot 4  Blender1 */
-    T_BLENDER,      /* slot 5  Blender2 (used in Seq 2) */
+    T_BLENDER,      /* slot 5  Blender2 = "Module 5" (Solid Seq 1 blender) */
     T_PACKAGING,    /* slot 6  Packaging */
     /* --- Liquid line (bottom row, slots 7..11) --- */
     T_MACRO,        /* slot 7  LMacro1 */
-    T_MACRO,        /* slot 8  LMacro2 (used in Seq 5) */
+    T_MACRO,        /* slot 8  LMacro2 */
     T_VESSEL,       /* slot 9  Vessel1 */
-    T_VESSEL,       /* slot 10 Vessel2 (used in Seq 5) */
+    T_VESSEL,       /* slot 10 Vessel2 */
     T_BOTTLING      /* slot 11 Bottling */
 };
 
@@ -50,5 +50,3 @@ const SlotLeds SLOT_LEDS[MODULE_COUNT] = {
     { 73, 74,  22, 38 },   /* slot 11 Bottling     */
 };
 
-/* Button cycle order (Seq 3 deferred → skipped). See SEQ_CYCLE in config.h. */
-const uint8_t SEQ_CYCLE[SEQ_CYCLE_COUNT] = { 1, 2, 4, 5 };

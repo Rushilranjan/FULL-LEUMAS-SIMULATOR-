@@ -1,59 +1,53 @@
 /**
  * seq_leds.h — paints the running sequence onto the WS2812B strip.
  *
- * The sequence engine (lotmgr/module) stays the source of truth: it owns the
- * state machine, the timings and the BLE cues to the Android robot. This file
- * only READS that state and draws it, so the lights are always in step with
- * what the robot is animating.
+ * This file draws; it decides nothing. solid_seq1.c owns the state machine, the
+ * timings and the BLE cues to the Android robot. seq_leds READS module state
+ * back and paints it, so the lights are always in step with what the robot is
+ * animating.
  *
  * ---------------------------------------------------------------------------
  * ONE WRITER, ALWAYS
  * ---------------------------------------------------------------------------
  * The strip has exactly one owner at a time. Normally that is the LED command
- * centre. `seq_leds_start()` takes ownership for the duration of a sequence and
- * `seq_leds_stop()` hands it back; while a sequence is running, led_cmd refuses
- * manual paint commands instead of half-overwriting the frame. That is the same
- * rule that keeps the strip from ever showing a colour nobody asked for.
+ * centre. seq_leds_start() takes ownership for the duration of a sequence and
+ * seq_leds_stop() hands it back; while a sequence is running, led_cmd refuses
+ * manual paint commands instead of half-overwriting the frame.
+ *
+ * The same rule applies inside the firmware: solid_seq1.c must never call
+ * led_strip_* directly. It goes through seq_leds_strip_set() and module state,
+ * both of which repaint() can see. A direct led_strip_set() would survive
+ * exactly until the next repaint and the bug would present as flicker.
  *
  * ---------------------------------------------------------------------------
- * WHAT YOU SEE
+ * WHAT YOU SEE — three colours, no more
  * ---------------------------------------------------------------------------
- *   RUNNING            green,  solid
- *   TRANSFER in/out    yellow, solid
- *   HOLDING (waiting)  yellow, BLINKING  <- the bottleneck the demo is about
- *   idle, in the mask  red,    solid
- *   not in the mask    dark
+ *   MOD_RUNNING       BLUE,  100%   the module is processing
+ *   MOD_READY         GREEN, 100%   finished, ready for the robot to collect
+ *   MOD_OFF           dark          not processing, or the robot has left
+ *   not in the mask   dark          not part of this sequence at all
  *
- * One rule decides what is lit at all: a module the active sequence uses gets a
- * colour, anything else is dark. That covers the line that is not running AND
- * the deliberately-missing unit (Blender2 in Seq 1, Vessel2 in Seq 4) — so
- * "adding a module" in Seq 2/5 literally shows up as a pixel that was dark
- * lighting up.
- *
- * The status run fills solid BLUE up to a module the moment that module is
- * completely done with the lot. Fills are cumulative and monotonic: a pixel that
- * has been latched never goes dark again until the sequence restarts.
+ * Nothing blinks and nothing fades. A module is one of three things and it says
+ * so plainly from across the room.
  *
  * ---------------------------------------------------------------------------
  * TWO BRIGHTNESSES, ONE STRIP
  * ---------------------------------------------------------------------------
- * The in-module pixels run at 100% and the status run at SEQ_STATUS_PCT (10%),
- * both as PER-PIXEL percentages over a master of 100. The modules are the
- * subject; the status run is the line drawn between them, and at equal
- * brightness it competes with them for attention. Lowering the master instead
- * would dim both together and lose the distinction.
+ * Module pixels run at SS1_MODULE_PCT (100%) and the strip at SEQ_STRIP_PCT
+ * (1%), both as PER-PIXEL percentages over a master of 100. The modules are the
+ * subject; the strip is the line drawn between them, and at equal brightness it
+ * would compete with them for attention. Lowering the master instead would dim
+ * both together and lose the distinction — so the master stays at 100.
  *
  * ---------------------------------------------------------------------------
- * STATUS IS A READOUT, THE EXIT IS AN ANIMATION
+ * THE STRIP IS A BITMAP, NOT AN EFFECT
  * ---------------------------------------------------------------------------
- * These are deliberately different things and are drawn differently:
- *
- *   status fill  ONE pixel at a time, evenly across the whole transfer. It says
- *                "the line is complete this far", so it must be readable at a
- *                glance and must never light a pixel that is not yet true.
- *   exit flow    a moving head with a fading tail, looping. It says "the lot is
- *                leaving" and carries no per-pixel meaning, so it is free to be
- *                a flow animation. It uses led_fx; the status fill does not.
+ * Everything the strip shows is one flag per pixel: lit white at 1%, or dark.
+ * The recharge and material-flow animations in solid_seq1.c are nothing more
+ * than that flag changing over time — a moving head is a pixel that lights as
+ * the one behind it goes out. There is no overlay, no tail and no led_fx in the
+ * sequence path, which is why an animation can never leave a stray pixel behind
+ * it: repaint() draws the whole frame from the flags every time.
  */
 #ifndef APP_SEQ_LEDS_H
 #define APP_SEQ_LEDS_H
@@ -61,44 +55,36 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* Take the strip, clear every fill, and draw the sequence's opening frame.
- * Called from lotmgr_start(); `seq` is 1, 2, 4 or 5. */
+/* Take the strip, clear every lit pixel, and draw the opening frame. Called
+ * from solid_seq1_start(); `seq` is always 1 and is kept only so the console
+ * can name what is running. */
 void seq_leds_start(uint8_t seq);
 
-/* Hand the strip back to the LED command centre and blank it. */
+/* Hand the strip back to the LED command centre and blank it. Do not call this
+ * directly to end a demo — call solid_seq1_stop(), which calls this. Stopping
+ * the renderer alone would leave the state machine ticking and still cueing the
+ * robot over BLE. */
 void seq_leds_stop(void);
 
-/* True while the sequence owns the strip — led_cmd's guard on manual commands. */
+/* True while the sequence owns the strip — led_cmd guard on manual commands. */
 bool seq_leds_active(void);
 
 /* Which sequence is running (0 = none), for status lines and error messages. */
 uint8_t seq_leds_seq(void);
 
-/* Redraw if anything changed, and finish off any animation that has run out.
- * Call every main-loop pass, after lotmgr_tick(). */
+/* Redraw if anything changed. Call every main-loop pass, AFTER
+ * solid_seq1_tick(), so a pixel set this pass is drawn this pass. */
 void seq_leds_tick(void);
 
-/* ---- hooks, called by lotmgr at the transfer-completion points ----------- */
+/* ---- the strip, as seen by the sequence ---------------------------------- */
 
-/* Latch the status run solid blue up to the end of `slot`'s segment. Called
- * when that module is COMPLETELY done — its material has left and it will not
- * be used again this run. Cumulative; only ever adds pixels. */
-void seq_leds_fill_upto(uint8_t slot);
+/* Light or clear the inclusive pixel span [a,b]. Lit pixels are white at
+ * SEQ_STRIP_PCT. Out-of-range pixels are ignored, so a mistyped coordinate can
+ * never scribble past the end of the strip. */
+void seq_leds_strip_set(uint16_t a, uint16_t b, bool on);
 
-/* Fill the hand-off span from `from_slot` to `to_slot` over `ms` (blender ->
- * packaging, vessel -> bottling), lighting exactly ONE pixel at a time so the
- * span takes the whole of `ms` to complete. When it ends the run is left solid
- * blue only as far as `keep_slot`:
- *   keep_slot == from_slot  -> clear the span again (another batch follows)
- *   keep_slot == to_slot    -> keep all of it (this was the final ship)
- * Anything in between keeps up to that module. */
-void seq_leds_swipe(uint8_t from_slot, uint8_t to_slot, uint32_t ms, uint8_t keep_slot);
-
-/* The "lot shipped" flow: a continuous looping animation along the line's exit
- * run for `ms`, which then latches solid blue and stays lit. Unlike the fill
- * above this IS an animation — a head with a fading tail, EXIT_FLOW_PASSES
- * sweeps over the run. */
-void seq_leds_exit_flow(uint8_t from_slot, uint32_t ms);
+/* Every strip pixel dark. Module pixels are unaffected. */
+void seq_leds_strip_clear(void);
 
 /* Print the slot -> pixel table over the console, flagging anything that falls
  * outside the strip. Used by the `seq map` command to check the wiring by eye. */

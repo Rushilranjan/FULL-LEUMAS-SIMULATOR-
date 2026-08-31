@@ -4,10 +4,10 @@ Firmware for the Leumas factory-line demo rig, on an **STM32F767ZI Nucleo**. It 
 
 1. **A WS2812B LED strip on PE9**, driven by a serial **LED command centre**. You type a colour, an
    index and a range, and the strip shows exactly that.
-2. **The sequence engine**, which runs the five production sequences, cues an Android "robot" display
-   over a BLE UART, and — via `App/seq_leds.c` — paints those sequences onto the same strip.
+2. **Solid Sequence 1**, a hardcoded production demo that cues an Android "robot" display over a BLE
+   UART and — via `App/seq_leds.c` — paints itself onto the same strip.
 
-The strip has exactly **one writer at a time**. Normally that is the command centre; `seq <n>` hands
+The strip has exactly **one writer at a time**. Normally that is the command centre; `seq 1` hands
 ownership to the sequence renderer, and `seq stop` hands it back. While a sequence is running, manual
 paint commands are refused rather than half-overwriting its frame.
 
@@ -17,79 +17,99 @@ paint commands are refused rather than half-overwriting its frame.
 The sequence sections that follow describe the production story — the same one the strip shows and the
 BLE cues narrate to the robot.
 
-## Sequence 1 — the bottleneck (one blender)
-Two batches share **one** blender, so the second batch has to wait — that wait is the whole point.
+## Solid Sequence 1 — the production demo
 
-- **Batch A:** Macro1 (slot 1) + Gravimetric (slot 3) **run** → robot carries each to Blender1
-  (slot 4) → Blender1 **runs** → hand-off Blender1 → Packaging (slot 6) → Packaging **runs**.
-- **Batch B:** Macro2 (slot 2) + Gravimetric run, then **wait** (`MOD_HOLDING`) because Blender1 is
-  still busy with Batch A. Only when Blender1 frees does Batch B flow through it.
+A small-scale nutraceutical production process, hardcoded and deterministic. It runs **four complete
+cycles** and then stops in a COMPLETE state; it never starts a fifth on its own.
 
-The single gravimetric and single blender are the serialisation points; the waiting module is the
-bottleneck the robot display shows.
+Four modules take part. Everything else on the board — including the whole liquid line — stays dark.
 
-## Sequence 2 — relieve the bottleneck (two blenders)
-Identical batches, but **Blender2 (slot 5) is now active**. Batch A takes Blender1, Batch B takes
-Blender2, so they run **in parallel with no waiting** — the same work finishes sooner. That
-"add a module, remove the wait" is the production-increase message.
+| Requirement name | Slot | Role | Module px |
+|---|---|---|---|
+| Module 2 | 2 | Macro | 49-51 |
+| Module 3 | 3 | Gravimetric | 53-55 |
+| Module 5 | 5 | Blender | 61-62 |
+| Module 6 | 6 | Packaging | 76-77 |
 
-Both sequences inject `SOLID_LOTS_PER_RUN` (= 2) batches. Every transfer goes through the shared
-mover arbiter, so the two batches serialise cleanly on the one robot.
+### One cycle
 
-## Sequences 4 & 5 — the liquid line (1.5)
-The liquid line is the **bottom row** of modules. It tells the exact same two-part story as the solid
-line, one stage shorter — the feed is just a macro (no gravimetric): **LMacro → Vessel → Bottling → exit**.
+1. **Macro and Gravimetric both run** for 10 s. Macro finishes and goes green.
+2. **Robot collects the macro material** (10 s) and **dumps it into the blender** (10 s). The
+   gravimetric finishes partway through the dump and goes green. The blender starts running.
+3. **Robot collects the gravimetric material** (10 s) — and *at the same time* the macro **recharges**
+   on strip pixels 0-5. When the recharge finishes the macro goes blue: it is running again.
+4. **Robot dumps the gravimetric material into the blender** (10 s) and returns home.
+5. **The gravimetric recharges** on pixels 0-9 while the blender runs and hands off. When it finishes,
+   the gravimetric goes blue.
+6. **Blender → Packaging.** No robot movement: material flows along pixels **14-16**, four times.
+   Packaging then goes blue.
+7. **The second macro and gravimetric carries** repeat steps 2-4 with the same visual logic.
+8. **Packaging → output.** Packaging goes green and material flows out along pixels **17-21**.
+9. The board blanks, everything resets, and the next cycle begins.
 
-- **Sequence 4 — the bottleneck (one vessel):** two batches share **one** Vessel1, so batch B's macro
-  runs and then **waits** while Vessel1 is busy — the same bottleneck lesson as Seq 1.
-- **Sequence 5 — relieve it (two vessels):** Vessel2 is now active, so the two batches run **in parallel
-  with no waiting** — the same "add a module, raise production" lesson as Seq 2.
+One cycle is about **2 min 10 s**; four cycles about **8 min 40 s**.
 
-The engine is **identical** to the solid line — `SOLID_RECIPE` and `LIQUID_RECIPE` in `App/lotmgr.c`
-share it; only the module types and the single-vs-two middle module differ. `T_VESSEL`/`T_BOTTLING` are the liquid analogues of
-`T_BLENDER`/`T_PACKAGING`.
-
-### One rig, two lines
-Both rows are slots in the same engine: the solid line takes slots 1–6, the liquid line slots 7–11. Only
-one line runs per sequence — the other line's modules and status pixels stay **dark**.
-
-### What a sequence looks like on the strip
+### What it looks like on the strip
 
 | Module state | Look |
 |---|---|
-| running | **green**, solid |
-| transferring (in or out) | **yellow**, solid |
-| waiting on the bottleneck | **yellow, blinking** |
-| idle, and used by this sequence | **red** |
+| running | **blue**, 100 % |
+| completed, ready for the robot | **green**, 100 % |
+| off — not processing, or the robot has left | **dark** |
 | not used by this sequence | **dark** |
 
-One rule decides what is lit at all: a module the running sequence uses gets a colour, everything else
-is dark. That covers the idle line *and* the deliberately-missing unit — Blender2 in Seq 1, Vessel2 in
-Seq 4 — so "add a module" in Seq 2/5 literally shows up as a pixel that was dark lighting up.
+Three colours, nothing else, and nothing blinks. The strip itself is only ever **white at
+`SEQ_STRIP_PCT` (1 %)** and is used for exactly three things: a module recharging, material moving
+between modules, and material leaving the system.
 
-The status run fills solid **blue** up to a module the moment that module is completely done with the
-lot; fills are cumulative and never go backwards within a run. The mid→final hand-off (blender →
-packaging, vessel → bottling) lights **one status LED at a time**, spread evenly over the whole
-transfer, and the ship-out is a looping flow along the exit run that then latches solid and stays lit.
+Modules and strip are deliberately **two different brightnesses on the one strip**: modules at
+`SS1_MODULE_PCT` (100 %) and the strip at 1 %, both as per-pixel percentages over a master of 100. The
+modules are the subject; the strip is the line drawn between them. Lowering the master instead would
+dim both together and lose the distinction.
 
-Status and modules are deliberately **two different brightnesses on the one strip**: the in-module
-pixels run at **100 %** and the status run at **`SEQ_STATUS_PCT` (10 %)**, both as per-pixel
-percentages over a master of 100. The modules are the subject; the status run is the line drawn
-between them, and at equal brightness it competes with them for attention. Lowering the master
-instead would dim both together and lose the distinction.
+### The two animations
 
-The fill and the exit are drawn differently on purpose. The **fill is a readout** — it means "the line
-is complete this far", so it advances one pixel at a time and never lights a pixel that is not yet
-true. The **exit is an animation** — it means "the lot is leaving", carries no per-pixel meaning, and
-is free to be a moving head with a fading tail (`EXIT_FLOW_PASSES` sweeps over `EXIT_SWIPE_MS`).
+Both are deliberately **slow** — this is a client-facing demo watched from 2-3 m away, not an LED
+chase. Everything the strip shows is one flag per pixel, so an animation can never leave a stray pixel
+behind it.
+
+**Recharge** (macro 0-5, gravimetric 0-9) is *progressive*. A head crawls from the first uncharged
+pixel to the end of the span; when it gets there the next `SS1_CHARGE_CHUNK` (2) pixels latch solid and
+the head restarts past them, so the charged section grows and each pass is shorter than the last. Over
+0-5 that is three stages — swipe `0→5` keep `0,1`; swipe `2→5` keep `0..3`; swipe `4→5` keep `0..5` —
+and the identical code over 0-9 gives five. The head and the charged pixels are the same white at 1 %:
+**motion alone** tells them apart, so what the audience sees is charge accumulating rather than an
+animation being played.
+
+**Material flow** (blender→packaging 14-16, packaging→output 17-21) fills its span one pixel at a
+time, holds it full for one step, blanks, and repeats. Over 14-16 that is `14` → `14,15` → `14,15,16` →
+dark, four times over. The all-dark hold **is** the gap between passes.
+
+To retune the whole demo, change `SS1_CHARGE_STEP_MS` and `SS1_FLOW_STEP_MS` in `Core/Inc/config.h` and
+nothing else. Every other duration is read in exactly one place.
+
+### Concurrency
+
+The two animators run on their own clocks, independent of the step chain and of each other — that is
+what lets the macro recharge play while the robot is busy collecting from the gravimetric, and the
+gravimetric recharge play while the blender hands off to packaging. There is no blocking delay
+anywhere: every wait is a `SoftTimer` or a predicate, polled from `solid_seq1_tick()`.
+
+### The robot
+
+The BLE link is **transmit-only** — `MOVE:a>b` goes out, nothing comes back. There is no `ARRIVED`
+acknowledgement and no `HOME` command, so the firmware cannot know where the arm actually is. One MOVE
+cue goes out **per material carry**, when that carry begins, and the Android app plays its own full
+travel/pick/place/return-home animation against it. That is also why the robot needs no reset between
+cycles: it parks itself. Four MOVE cues per cycle, sixteen per run.
 
 ## Starting a sequence
-Either type `seq 1`, `seq 2`, `seq 4` or `seq 5` on the console, or press the board button, which walks
-**Seq 1 → 2 → 4 → 5 → 1 …** (`SEQ_CYCLE` in `config.c`). **Sequence 3** — continuous lot looping — is
-still deferred, so it is skipped by the cycle.
+Type `seq 1` on the console, or press the board button — either starts Solid Sequence 1 from cycle 1.
+Pressing the button again mid-demo restarts it cleanly. `seq` on its own reports the cycle and step it
+is on.
 
-A finished sequence leaves its final frame on the strip so you can look at the result; `seq stop` (or
-`stop`) clears it and hands the strip back to manual control.
+After the fourth cycle the board is parked dark and `seq` reports **COMPLETE**; the sequence still owns
+the strip. `seq stop` (or `stop`) hands it back to manual control.
 
 ## The LED strip
 
@@ -164,14 +184,17 @@ App/seq_leds.[ch]     draws the running sequence onto the strip, and owns it whi
 App/timebase.[ch]     millis() + soft timers (no blocking delays anywhere)
 App/app.[ch]          glue to HAL: app_init / app_tick / callbacks
 
-Core/Inc/config.h     slot map, sequence masks, timings, and the rig's pixel mapping
-App/config.c          slot->role table, SLOT_LEDS[] pixel map, button cycle order
-App/module.[ch]       per-module actor state machine
-App/lotmgr.[ch]       production engine: recipe, lot injection, routing, transfers
-App/transfer.[ch]     shared robot/strip arbiter (one-at-a-time, FIFO queue)
+Core/Inc/config.h     slot map, the SS1_* sequence constants, and the rig's pixel mapping
+App/config.c          slot->role table, SLOT_LEDS[] pixel map
+App/module.[ch]       per-module state: OFF / RUNNING (blue) / READY (green)
+App/solid_seq1.[ch]   Solid Sequence 1: the step chain plus both animators
 App/button.[ch]       EXTI + debounce
 App/ble.[ch]          ASCII cue protocol over UART
 ```
+
+`solid_seq1.c` decides; `seq_leds.c` draws; `module.c` stores. They never bypass each other — in
+particular `solid_seq1.c` must never call `led_strip_*` directly, because the next repaint would
+overwrite it and the bug would present as flicker.
 
 ## Rig pixel map
 
@@ -255,13 +278,10 @@ purpose — changing one never disturbs the other. Painting an LED any colour ma
 paint commands are refused until you stop it:
 
 ```
-seq 1               solid line, ONE blender  -> batch B waits
-seq 2               solid line, TWO blenders -> runs in parallel
-seq 4               liquid line, ONE vessel  -> batch B waits
-seq 5               liquid line, TWO vessels -> runs in parallel
+seq 1               Solid Sequence 1 - 4 production cycles, then it stops
 seq stop            end it and take the strip back
 seq map             print the slot -> pixel table, flagging bad coordinates
-seq                 which sequence is running
+seq                 which cycle and step it is on, or COMPLETE
 ```
 
 **Setup:**
@@ -390,28 +410,56 @@ void HAL_TIM_ErrorCallback(TIM_HandleTypeDef *htim)     { app_on_tim_error(htim)
 
 **Sequences:**
 
-8. `seq map` — check every row against the physical strip by eye before anything else.
-9. `seq 1` — Macro1 (45-47) + Gravimetric (53-55) green, robot transfer yellow, Blender1 (57-58) green,
-   status filling 0-1 then 0-9; **Blender2 (61-62) dark**; batch B's Macro2 (49-51) **blinking yellow**
-   while Blender1 is busy. The whole liquid line and status 22-43 stay dark.
-10. `seq 2` — Blender2 now lights, and nothing blinks: no wait.
-11. `seq 4` / `seq 5` — the same story on the liquid line; the solid line and status 0-21 stay dark.
-12. **Exit** — a flow animation sweeps 17-21 (or 39-43) five times over 20 s, then latches solid and
-    stays lit.
+8. `seq map` — check every row against the physical strip by eye before anything else. Macro2 49-51 /
+   0-5, Gravimetric 53-55 / 0-9, Blender2 61-62 / 0-13, Packaging 76-77 / 0-16, exit 17-21.
+9. `seq 1`, then time one cycle with a stopwatch. Only slots 2, 3, 5 and 6 ever light; the whole liquid
+   line and status 22-43 stay dark throughout.
+
+    | t | What you should see |
+    |---|---|
+    | 0 s | Module 2 + 3 **blue**, everything else dark, strip dark |
+    | 10 s | Module 2 **green**; `MOVE:2>5` on the BLE line |
+    | 20 s | Module 2 dark, Module 5 dark |
+    | 25 s | Module 3 **green** |
+    | 30 s | Module 5 **blue**; `MOVE:3>5`; the **0→5 recharge head starts crawling** |
+    | ~40 s | Module 3 dark, Module 5 green; then Module 2 back to **blue** (recharge done) |
+    | 50 s | Module 5 **blue**; the **0→9 recharge** starts |
+    | 60 s | Module 5 **green**; 14→15→16 fills and blanks **four times** |
+    | ~70 s | Module 3 back to **blue** (recharge done) |
+    | ~73 s | Module 6 **blue**; Module 2 **green**; `MOVE:2>5` — the second half repeats |
+    | ~118 s | Module 6 **green**; 17→18→19→20→21 fills toward the output |
+    | ~130 s | board blanks, next cycle starts |
+
+10. **Recharge shape** — watch 0-5 at t=30 s. It must go `0,1,2,3,4,5` one at a time, then settle to
+    `0,1` solid; then `2,3,4,5` with `0,1` still lit, settling to `0..3`; then `4,5`, settling to
+    `0..5`. If it looks like a fast chase, raise `SS1_CHARGE_STEP_MS`.
+11. **Colours** — only blue, green and dark, all at full brightness. Nothing blinks. The strip is
+    white and clearly dimmer than the modules.
+12. **After cycle 4** (~8 min 40 s) the board is dark, `seq` reports **COMPLETE**, and cycle 5 does
+    **not** start.
 13. `red 20 30` mid-sequence → refused with the `seq stop` message, strip unchanged. `seq stop` → the
-    strip blanks and manual commands work again.
-14. **BLE** — `READY / SEQ:n / RUN / MOVE / DONE / LOT:DONE` still arrive at the same moments, so the
-    Android robot stays in step. Time the 20 s run / 15 s hand-off / 20 s exit phases with a
-    stopwatch. `TRANSFER_SWIPE_MS` and `EXIT_SWIPE_MS` must match the Android `Timings.kt`, or the
-    app's conveyor and exit visuals finish early and drift out of step with the strip.
+    strip blanks and manual commands work again. Watch the BLE line: **no further `MOVE:` messages**
+    after `seq stop`.
+14. **Button** — press it mid-run: the demo restarts cleanly from cycle 1.
+15. **BLE** — one cycle should emit `SEQ:1` once, then exactly four `MOVE:` cues (`2>5`, `3>5`, `2>5`,
+    `3>5`) and one `LOT:DONE`, plus `RUN:`/`DONE:` on each module colour change. Confirm the Android
+    arm animates on each MOVE. Set `SS1_EMIT_RUN_DONE` to 0 for MOVE-only if the app would rather not
+    see the module cues.
 
 ## To tune / finish before the demo
 - **`App/led_strip.h`** is the one LED tuning block: `LED_COUNT_DEFAULT` (90), `LED_MASTER_PCT_DEFAULT`
   (30 %), `LED_BUDGET_MA_DEFAULT` (1000 mA). `count` and `power` change the first and last live over
   serial, so you can settle on values before editing anything.
 - Confirm all slot roles in `App/config.c`: solid (Macro1/2, Gravimetric, Blender1/2, Packaging) and
-  liquid (LMacro1/2, Vessel1/2, Bottling).
-- Timing constants in `Core/Inc/config.h` — keep `TRANSFER_ROBOT_MS` equal to the Android app's
-  `Timings.TRANSFER_ROBOT_MS`.
-- `SOLID_LOTS_PER_RUN` (= 2) must not exceed the number of Macro slots on the running line — each batch
-  consumes its own macro.
+  liquid (LMacro1/2, Vessel1/2, Bottling). The liquid line is mapped but unused until its own sequence
+  lands.
+- **Animation pace** — `SS1_CHARGE_STEP_MS` (400) and `SS1_FLOW_STEP_MS` (700) in `Core/Inc/config.h`
+  set the tempo of the whole demo. Slower is better than faster; `600` / `1000` for a slower run,
+  `250` / `450` for a faster one. Nothing else needs touching.
+- **Fixed durations** — the five 10 s windows (`SS1_INITIAL_PROCESS_MS`, `SS1_COLLECTION_MS`,
+  `SS1_DUMP_MS`) are pinned by the requirement and must not be shortened. They account for 80 s of each
+  cycle. If the demo needs to be shorter, drop `SS1_FLOW_OUTPUT_PASSES` to 1 and
+  `SS1_PACKAGING_FINISH_MS` to 2000 first.
+- **Inferred windows** the requirement leaves open, tune freely: `SS1_BLEND_RUN_MS` (10 s of blender
+  running between "both materials in" and "ready to ship" — without it that blue frame would never be
+  seen), `SS1_PACKAGING_FINISH_MS`, `SS1_GRAV_READY_AT_MS`, `SS1_CYCLE_GAP_MS`.

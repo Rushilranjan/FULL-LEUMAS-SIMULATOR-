@@ -3,39 +3,29 @@
 #include "module.h"
 #include "led_strip.h"
 #include "led_fx.h"
-#include "timebase.h"
 #include <stdio.h>
 
 /* ---- the palette --------------------------------------------------------
- * Deliberately tiny. Four colours carry the whole story, and nothing else is
- * ever written to the strip while a sequence runs. */
+ * Three colours carry the whole story, and nothing else is ever written to the
+ * strip while a sequence runs. */
 #define C_RUN_R     0u
-#define C_RUN_G   255u
-#define C_RUN_B     0u          /* green  — running                          */
-#define C_XFR_R   255u
-#define C_XFR_G   200u
-#define C_XFR_B     0u          /* yellow — transferring, or waiting (blink) */
-#define C_IDLE_R  255u
-#define C_IDLE_G    0u
-#define C_IDLE_B    0u          /* red    — idle                             */
-#define C_FLOW_R    0u
-#define C_FLOW_G    0u
-#define C_FLOW_B  255u          /* blue   — status run / material flow       */
-
-/* How long each pixel takes is derived from the transfer's own duration, so the
- * animation always fits the hand-off exactly. There is deliberately NO clamp:
- * these spans are only 3-5 pixels, and a ceiling here would finish the whole
- * animation in the first couple of seconds and leave the rest of the window
- * dead — which is exactly what a 400 ms ceiling used to do to the 10 s swipe. */
+#define C_RUN_G     0u
+#define C_RUN_B   255u          /* blue  — running                           */
+#define C_DONE_R    0u
+#define C_DONE_G  255u
+#define C_DONE_B    0u          /* green — completed, ready for the robot    */
+#define C_STRIP_R 255u
+#define C_STRIP_G 255u
+#define C_STRIP_B 255u          /* white — recharge and material flow        */
 
 /* ---- state -------------------------------------------------------------- */
 
 static bool     s_active;
 static uint8_t  s_seq;
 static uint32_t s_mask;                     /* slots this sequence uses       */
-static bool     s_liquid;                   /* which line is running          */
 
-/* Status pixels latched solid blue. Cumulative and monotonic within a run. */
+/* One flag per strip pixel: lit white at SEQ_STRIP_PCT, or dark. This is the
+ * whole of what the strip can show — see the header. */
 static bool     s_lit[LED_COUNT_MAX];
 
 /* Repaint is change-driven so the driver keeps its "only send a frame when
@@ -44,28 +34,6 @@ static ModState s_shown[MODULE_COUNT];
 static uint32_t s_lit_version;              /* bumped whenever s_lit changes  */
 static uint32_t s_shown_version;
 static bool     s_force_paint;
-
-/* The pending end-of-fill latch: when the hand-off fill reaches the end of its
- * span, fill up to this slot. -1 = no fill of ours is running. */
-static int8_t   s_swipe_keep = -1;
-
-/* The hand-off fill. Status is a READOUT, not an effect: it advances exactly one
- * pixel at a time, evenly across the transfer, so what the audience sees is
- * material creeping along the line rather than an animation being played. That
- * is why this does not use led_fx (whose head-plus-tail comet lights several
- * pixels at once and latches nothing until it stops) — led_fx is kept for the
- * exit, which IS a flow animation. */
-static bool     s_fill_run;         /* a hand-off fill is advancing         */
-static uint16_t s_fill_next;        /* pixel to light on the next step      */
-static uint16_t s_fill_end;         /* last pixel of the span, inclusive    */
-static uint32_t s_fill_step_ms;     /* dwell on each pixel                  */
-static uint32_t s_fill_due;         /* millis() when the next pixel lights  */
-
-/* The exit flow is a looping swipe plus a stopwatch; when it runs out the run
- * latches solid blue and stays lit. */
-static bool      s_exit_run;
-static SoftTimer s_exit_timer;
-static uint8_t   s_exit_a, s_exit_b;
 
 /* ---- helpers ------------------------------------------------------------ */
 
@@ -104,34 +72,26 @@ static void unlatch(uint16_t a, uint16_t b)
 
 /* ---- painting ------------------------------------------------------------ */
 
-/* Draw one module's own pixels for its current state. */
+/* Draw one module's own pixels for its current state. Module pixels are always
+ * at full brightness: the strip percentage is deliberately not applied here. */
 static void paint_module(uint8_t slot, ModState st)
 {
     const SlotLeds *L = &SLOT_LEDS[slot];
     uint8_t r, g, b;
-    uint8_t pct   = 100u;
-    bool    blink = false;
 
     if (!in_mask(slot)) {
         r = 0u; g = 0u; b = 0u;             /* not in this sequence: dark */
     } else {
         switch (st) {
         case MOD_RUNNING:
-            r = C_RUN_R; g = C_RUN_G; b = C_RUN_B;
-            break;
-        case MOD_TRANSFER_OUT:
-        case MOD_TRANSFER_IN:
-            r = C_XFR_R; g = C_XFR_G; b = C_XFR_B;
-            break;
-        case MOD_HOLDING:                    /* waiting on the bottleneck */
-            r = C_XFR_R; g = C_XFR_G; b = C_XFR_B;
-            blink = true;
+            r = C_RUN_R;  g = C_RUN_G;  b = C_RUN_B;
             break;
         case MOD_READY:
-        case MOD_INACTIVE:
+            r = C_DONE_R; g = C_DONE_G; b = C_DONE_B;
+            break;
+        case MOD_OFF:
         default:
-            r = C_IDLE_R; g = C_IDLE_G; b = C_IDLE_B;
-            pct = (uint8_t)SEQ_IDLE_PCT;     /* only the idle ones are dimmable */
+            r = 0u; g = 0u; b = 0u;
             break;
         }
     }
@@ -139,16 +99,11 @@ static void paint_module(uint8_t slot, ModState st)
     if (!px_ok(L->mod_a) || !px_ok(L->mod_b)) {
         return;                              /* coordinate off the strip */
     }
-    /* Colour first: led_strip_set_range() clears the blink flag by design, so
-     * the flag has to go back on afterwards or a waiting module would go solid. */
     led_strip_set_range(L->mod_a, L->mod_b, r, g, b);
-    led_strip_set_range_pct(L->mod_a, L->mod_b, pct);
-    if (blink) {
-        led_strip_set_range_blink(L->mod_a, L->mod_b, true);
-    }
+    led_strip_set_range_pct(L->mod_a, L->mod_b, (uint8_t)SS1_MODULE_PCT);
 }
 
-/* Redraw the whole frame: every module, then the status run. */
+/* Redraw the whole frame: every module, then every strip pixel. */
 static void repaint(void)
 {
     uint16_t n = led_strip_count();
@@ -159,8 +114,8 @@ static void repaint(void)
         paint_module(s, st);
     }
 
-    /* The status run. Latched pixels blue, everything else this file owns off.
-     * Module pixels were just written above, so skip them here. */
+    /* The strip. Lit pixels white, everything else this file owns off. Module
+     * pixels were just written above, so skip them here. */
     for (uint16_t i = 0; i < n; i++) {
         bool is_module = false;
         for (uint8_t s = 0; s < MODULE_COUNT; s++) {
@@ -172,14 +127,12 @@ static void repaint(void)
         if (is_module) {
             continue;
         }
-        /* The brightness goes on EVERY status pixel, lit or not. The exit head
-         * is drawn into the overlay, and led_strip's composite() applies the
-         * per-pixel percentage to overlay pixels too — so a dark pixel left at
-         * led_strip_reset()'s default of 100% would flare to full brightness the
-         * moment the head crossed it, while the trail behind it stayed at 10%. */
-        led_strip_set_pixel_pct(i, (uint8_t)SEQ_STATUS_PCT);
+        /* The brightness goes on EVERY strip pixel, lit or not, so a pixel that
+         * lights later cannot flare at led_strip_reset()'s default of 100%
+         * before its percentage is set. */
+        led_strip_set_pixel_pct(i, (uint8_t)SEQ_STRIP_PCT);
         if (s_lit[i]) {
-            led_strip_set(i, C_FLOW_R, C_FLOW_G, C_FLOW_B);
+            led_strip_set(i, C_STRIP_R, C_STRIP_G, C_STRIP_B);
         } else {
             led_strip_set(i, 0u, 0u, 0u);
         }
@@ -195,36 +148,20 @@ void seq_leds_start(uint8_t seq)
 {
     s_seq    = seq;
     s_active = true;
-    s_liquid = (seq == 4u || seq == 5u);
+    s_mask   = SS1_ACTIVE_MASK;
 
-    switch (seq) {
-    case 1:  s_mask = SEQ1_ACTIVE_MASK; break;
-    case 2:  s_mask = SEQ2_ACTIVE_MASK; break;
-    case 4:  s_mask = SEQ4_ACTIVE_MASK; break;
-    case 5:  s_mask = SEQ5_ACTIVE_MASK; break;
-    default: s_mask = SEQ1_ACTIVE_MASK; break;
-    }
-
-    if (s_liquid) {
-        s_exit_a = (uint8_t)LIQUID_EXIT_A;
-        s_exit_b = (uint8_t)LIQUID_EXIT_B;
-    } else {
-        s_exit_a = (uint8_t)SOLID_EXIT_A;
-        s_exit_b = (uint8_t)SOLID_EXIT_B;
-    }
-
-    /* Take the strip from whatever the console left on it. */
+    /* Take the strip from whatever the console left on it. The master goes back
+     * to 100 because that is what makes SS1_MODULE_PCT mean "full brightness"
+     * and SEQ_STRIP_PCT mean "1% of full". */
     led_fx_stop();
     led_strip_reset();
+    led_strip_clear_blink();
     led_strip_set_master_pct(LED_MASTER_PCT_DEFAULT);
 
     for (uint16_t i = 0; i < LED_COUNT_MAX; i++) {
         s_lit[i] = false;
     }
     s_lit_version++;
-    s_swipe_keep = -1;
-    s_fill_run   = false;
-    s_exit_run   = false;
     s_force_paint = true;
     repaint();
 }
@@ -234,76 +171,36 @@ void seq_leds_stop(void)
     if (!s_active) {
         return;
     }
-    s_active     = false;
-    s_seq        = 0u;
-    s_swipe_keep = -1;
-    s_fill_run   = false;
-    s_exit_run   = false;
+    s_active = false;
+    s_seq    = 0u;
     led_fx_stop();
-    /* The tail is global led_fx state shared with the console's `swipe`, so put
-     * it back however the exit left it. */
-    led_fx_set_tail(LED_FX_TAIL_DEFAULT);
     led_strip_reset();
 }
 
 bool    seq_leds_active(void) { return s_active; }
 uint8_t seq_leds_seq(void)    { return s_seq; }
 
-/* ---- hooks --------------------------------------------------------------- */
+/* ---- the strip, as seen by the sequence ---------------------------------- */
 
-void seq_leds_fill_upto(uint8_t slot)
+void seq_leds_strip_set(uint16_t a, uint16_t b, bool on)
 {
-    if (!s_active || !slot_ok(slot)) {
+    if (!s_active || a > b) {
         return;
     }
-    latch(SLOT_LEDS[slot].st_base, SLOT_LEDS[slot].st_end);
+    if (on) {
+        latch(a, b);
+    } else {
+        unlatch(a, b);
+    }
 }
 
-void seq_leds_swipe(uint8_t from_slot, uint8_t to_slot, uint32_t ms, uint8_t keep_slot)
+void seq_leds_strip_clear(void)
 {
-    if (!s_active || !slot_ok(from_slot) || !slot_ok(to_slot) || !slot_ok(keep_slot)) {
+    uint16_t n = led_strip_count();
+    if (!s_active || n == 0u) {
         return;
     }
-    /* The span is what this hand-off newly covers: just past the source's fill,
-     * through to the destination's. */
-    uint16_t a = (uint16_t)(SLOT_LEDS[from_slot].st_end + 1u);
-    uint16_t b = SLOT_LEDS[to_slot].st_end;
-    if (a > b || !px_ok(a) || !px_ok(b)) {
-        return;
-    }
-
-    uint32_t len = (uint32_t)(b - a + 1u);
-
-    /* Spread the span evenly over the whole hand-off, one pixel per step. With
-     * a 5-pixel span and a 15 s transfer that is 3 s per pixel. */
-    s_fill_step_ms = (len > 0u) ? (ms / len) : ms;
-    if (s_fill_step_ms == 0u) s_fill_step_ms = 1u;
-    s_fill_next    = a;
-    s_fill_end     = b;
-    s_fill_due     = millis();          /* the first pixel lights at once */
-    s_fill_run     = true;
-    s_swipe_keep   = (int8_t)keep_slot;
-}
-
-void seq_leds_exit_flow(uint8_t from_slot, uint32_t ms)
-{
-    (void)from_slot;
-    if (!s_active || !px_ok(s_exit_a) || !px_ok(s_exit_b)) {
-        return;
-    }
-    uint32_t len  = (uint32_t)(s_exit_b - s_exit_a + 1u);
-    uint32_t step = (len > 0u) ? (ms / (len * EXIT_FLOW_PASSES)) : ms;
-
-    s_swipe_keep = -1;                /* this one is the exit, not a hand-off */
-    s_fill_run   = false;             /* nothing of ours may still be filling */
-    s_exit_run   = true;
-    timer_start(&s_exit_timer, ms);
-    /* A long tail over a short run turns the whole exit into one gradient
-     * sliding outwards, which reads as material leaving rather than as a dot
-     * crossing five LEDs. */
-    led_fx_set_tail((uint8_t)EXIT_FLOW_TAIL);
-    (void)led_fx_swipe(s_exit_a, s_exit_b,
-                       C_FLOW_R, C_FLOW_G, C_FLOW_B, (uint16_t)step, true);
+    unlatch(0u, (uint16_t)(n - 1u));
 }
 
 /* ---- per-pass work ------------------------------------------------------- */
@@ -314,56 +211,7 @@ void seq_leds_tick(void)
         return;
     }
 
-    /* The exit flow has run its time: stop looping and leave the run lit, so a
-     * shipped lot keeps a visible bar at the end of the line. */
-    if (s_exit_run && timer_expired(&s_exit_timer)) {
-        s_exit_run = false;
-        led_fx_stop();
-        led_fx_set_tail(LED_FX_TAIL_DEFAULT);   /* shared with the console */
-        latch(s_exit_a, s_exit_b);
-    }
-
-    /* Advance the hand-off fill by exactly ONE pixel when its dwell is up. The
-     * signed compare (as in led_fx.c) keeps the 49-day millis() wrap from
-     * stalling it.
-     *
-     * The run ends one dwell AFTER the last pixel lights, not on the same pass.
-     * Otherwise the keep/unlatch rule below would fire in the very frame that
-     * pixel appeared, and a non-final hand-off (Seq-1 batch A, which clears its
-     * span for batch B) would light its last pixel and erase it again before
-     * anyone saw it. Landing on `ms` also keeps the fill exactly in step with
-     * the lot timer lotmgr armed for the same transfer. */
-    if (s_fill_run && (int32_t)(millis() - s_fill_due) >= 0) {
-        if (s_fill_next > s_fill_end) {
-            s_fill_run = false;                 /* span complete and held */
-        } else {
-            latch(s_fill_next, s_fill_next);
-            s_fill_next++;
-            s_fill_due += s_fill_step_ms;
-            /* Starved for longer than a whole dwell (a long serial print, say):
-             * resync rather than firing a burst of pixels on consecutive
-             * passes, which would look like a jump. */
-            if ((int32_t)(millis() - s_fill_due) > (int32_t)s_fill_step_ms) {
-                s_fill_due = millis() + s_fill_step_ms;
-            }
-        }
-    }
-
-    /* A hand-off fill just finished: latch as far as it was told to keep, and
-     * clear the rest of its span. */
-    if (s_swipe_keep >= 0 && !s_fill_run) {
-        uint8_t  keep = (uint8_t)s_swipe_keep;
-        uint16_t base = SLOT_LEDS[keep].st_base;
-        uint16_t end  = SLOT_LEDS[keep].st_end;
-        s_swipe_keep  = -1;
-        latch(base, end);
-        /* Anything past keep_slot on this line goes back to unlit, so a
-         * not-final hand-off leaves the span clear for the next batch. */
-        unlatch((uint16_t)(end + 1u), s_liquid ? (uint16_t)(LIQUID_EXIT_A - 1u)
-                                               : (uint16_t)(SOLID_EXIT_A - 1u));
-    }
-
-    /* Redraw only when a module changed state or a fill moved. */
+    /* Redraw only when a module changed state or a strip pixel moved. */
     bool changed = s_force_paint || (s_shown_version != s_lit_version);
     if (!changed) {
         for (uint8_t s = 0; s < MODULE_COUNT; s++) {
@@ -390,7 +238,7 @@ void seq_leds_print_map(void (*emit)(const char *))
     if (!emit) {
         return;
     }
-    emit("\r\nslot  name          module px   status fill   \r\n");
+    emit("\r\nslot  name          module px   status run    \r\n");
     for (uint8_t s = 0; s < MODULE_COUNT; s++) {
         const SlotLeds *L = &SLOT_LEDS[s];
         bool ok = (L->mod_a < n) && (L->mod_b < n) &&

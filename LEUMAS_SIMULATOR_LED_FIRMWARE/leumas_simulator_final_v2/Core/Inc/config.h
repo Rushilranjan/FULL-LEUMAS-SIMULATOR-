@@ -1,7 +1,8 @@
 /**
- * config.h — sequence-engine tuning file.
+ * config.h — Solid Sequence 1 tuning file.
  *
- * Slot -> role mapping, which slots each sequence activates, and the timings.
+ * Slot -> role mapping, which slots the sequence uses, and every timing and
+ * animation knob it has.
  *
  * Also the RIG's pixel mapping — which LEDs on the strip are which module, and
  * which are the status run between them (SLOT_LEDS below). The strip's own
@@ -16,20 +17,23 @@
 #include <stdint.h>
 
 /* ======================================================================
- * 1. Module slots (solid line). Edit the roles to match the physical rig.
+ * 1. Module slots. Edit the roles to match the physical rig.
  *    Slot index here is 0-based internally; the human/BLE slot number is
- *    (index + 1), matching the requirements ("slot 1", "slot 3", ...).
+ *    (index + 1), matching the requirements ("Module 2", "Module 5", ...).
  * ==================================================================== */
 /* Two physical rows of modules. The SOLID line (top row) occupies the first
- * slots; the LIQUID line (bottom row) follows it. Only one line runs per
- * sequence.
+ * slots; the LIQUID line (bottom row) follows it.
  *   Solid  (slots 1..6):  Macro1, Macro2, Gravimetric, Blender1, Blender2, Packaging
- *   Liquid (slots 7..11): LMacro1, LMacro2, Vessel1, Vessel2, Bottling            */
+ *   Liquid (slots 7..11): LMacro1, LMacro2, Vessel1, Vessel2, Bottling
+ *
+ * Solid Sequence 1 drives slots 2, 3, 5 and 6 only. Everything else — including
+ * the whole liquid line — stays dark. The liquid mapping is kept intact because
+ * a liquid sequence will be added later; nothing here needs to change for it. */
 #define MODULE_COUNT        11         /* 6 solid + 5 liquid                  */
 
 /* Module roles/types (see MODULE_TYPES[] in config.c). T_VESSEL and T_BOTTLING
- * are the liquid line's analogues of the solid line's T_BLENDER and T_PACKAGING
- * (same engine behaviour, different physical modules). */
+ * are the liquid line analogues of T_BLENDER and T_PACKAGING; they are unused
+ * until the liquid sequence lands. */
 typedef enum {
     T_NONE = 0,
     T_MACRO,        /* feeder — shared by both lines (solid & liquid macros) */
@@ -40,7 +44,7 @@ typedef enum {
     T_BOTTLING      /* liquid line final stage (exit)                        */
 } ModType;
 
-/* Number of distinct ModType values (sizes the per-type counters). */
+/* Number of distinct ModType values. */
 #define MOD_TYPE_COUNT      (T_BOTTLING + 1)
 
 /* Slot -> role. Index 0 == slot 1. Adjust the one or two slots that differ. */
@@ -49,124 +53,118 @@ extern const ModType MODULE_TYPES[MODULE_COUNT];
 /* ---- Rig pixel mapping (see SLOT_LEDS[] in config.c) --------------------
  * Where each slot lives on the one 90-pixel WS2812B strip.
  *
- *   mod_a..mod_b     the module's OWN pixels — its running/transfer/idle colour
- *   st_base..st_end  the status run, filled solid white "up to" this module.
- *                    CUMULATIVE, not per-gap: slot 2's fill covers slot 1's too.
- *                    Each line has its own base (solid 0, liquid 22), so the
- *                    idle line's status pixels are never touched.
+ *   mod_a..mod_b     the module OWN pixels — its blue/green/dark state
+ *   st_base..st_end  the status run reaching up to this module. CUMULATIVE,
+ *                    not per-gap: slot 3 span covers slots 1 and 2 as well.
+ *                    Each line has its own base (solid 0, liquid 22).
  *
- * Both are inclusive. Every index must be < the strip's LED count. */
+ * Solid Sequence 1 takes ALL FOUR of its strip spans straight from this table
+ * (see SS1_STRIP_* in solid_seq1.c) — the requirement LED indices and this map
+ * are the same numbers, so there is exactly one source of truth for the wiring.
+ *
+ * Both are inclusive. Every index must be < the strip LED count. */
 typedef struct {
     uint8_t mod_a, mod_b;
     uint8_t st_base, st_end;
 } SlotLeds;
 extern const SlotLeds SLOT_LEDS[MODULE_COUNT];
 
-/* The ship-out runs past the last module of each line, where the "lot shipped"
- * flow animation plays. Inclusive. */
+/* The ship-out runs past the last module of each line, where the material
+ * leaves the system. Inclusive. */
 #define SOLID_EXIT_A    17u
 #define SOLID_EXIT_B    21u
 #define LIQUID_EXIT_A   39u
 #define LIQUID_EXIT_B   43u
 
-/* Brightness of an idle (red) module during a sequence, in percent. 100 = the
- * idle modules are as bright as the working ones. */
-#define SEQ_IDLE_PCT   100u
-
-/* Brightness of the status run, in percent. The status LEDs are context, not
- * the subject: kept well under the modules so the eye goes to the working
- * module rather than to the line between them. Applied as a PER-PIXEL
- * percentage, so it is independent of the module pixels, which stay at 100%.
- * The master (LED_MASTER_PCT_DEFAULT in led_strip.h) is 100 precisely so this
- * split is the only thing separating the two. */
-#define SEQ_STATUS_PCT  10u
-
-/* Sequence 1 (single-blender bottleneck demo). Active slots:
- *   1 = Macro1, 2 = Macro2, 3 = Gravimetric, 4 = Blender1, 6 = Packaging.
- * Blender2 (slot 5) is intentionally LEFT OUT so both batches must share the
- * one blender — that is what makes Macro2's batch WAIT while Blender1 is busy. Two lots are injected; the single blender serializes
- * them. Values are 0-based slot indices. */
-#define SEQ1_ACTIVE_MASK    ( (1u<<0) | (1u<<1) | (1u<<2) | (1u<<3) | (1u<<5) ) /* 1,2,3,4,6 */
-
-/* Sequence 2 (throughput via more modules). Same two batches, but Blender2
- * (slot 5) is now active too, so each batch gets its own blender and they run
- * in PARALLEL — no bottleneck wait. This is the whole point of Seq 2: adding a
- * module removes the wait and raises production. */
-#define SEQ2_ACTIVE_MASK    ( (1u<<0) | (1u<<1) | (1u<<2) | (1u<<3) | (1u<<4) | (1u<<5) ) /* all 6 */
-
-/* ---- Liquid line (1.5) -------------------------------------------------
- * Same story as the solid line, one stage shorter (no gravimetric): the feed is
- * just a macro. Flow: LMacro -> Vessel -> Bottling -> exit.
- *   Seq 4 (single-vessel bottleneck): LMacro1, LMacro2, Vessel1, Bottling active;
- *          Vessel2 (slot 10) LEFT OUT, so batch B's macro must WAIT
- *          for Vessel1 to empty — the same bottleneck lesson as Seq 1.
- *   Seq 5 (two vessels): Vessel2 also active, so the two batches run in PARALLEL
- *          with no wait — the same "add a module, raise production" lesson as Seq 2.
- * Slots (0-based bit): 6=LMacro1, 7=LMacro2, 8=Vessel1, 9=Vessel2, 10=Bottling. */
-#define SEQ4_ACTIVE_MASK    ( (1u<<6) | (1u<<7) | (1u<<8) | (1u<<10) )            /* 7,8,9,11 */
-#define SEQ5_ACTIVE_MASK    ( (1u<<6) | (1u<<7) | (1u<<8) | (1u<<9) | (1u<<10) )  /* 7..11    */
-
-/* How many batches (lots) a sequence pushes through per button press. Two
- * batches make the bottleneck (Seq 1/4) and the parallel relief (Seq 2/5)
- * obvious. Looping many lots is the deferred "Seq 3" idea — kept to 2 for now.
- * (SOLID_LOTS_PER_RUN kept as the name; it applies to the liquid line too.) */
-#define SOLID_LOTS_PER_RUN  2
-
-/* Button cycle order. Seq 3 (continuous looping) is deferred, so it is skipped:
- * the button walks 1 -> 2 -> 4 -> 5 -> 1 ... (solid bottleneck, solid parallel,
- * liquid bottleneck, liquid parallel). */
-#define SEQ_CYCLE_COUNT     4
-extern const uint8_t SEQ_CYCLE[SEQ_CYCLE_COUNT];
+/* Brightness of the strip, in percent, applied PER PIXEL over a master of 100.
+ * The requirement fixes this at 1%: the strip is context, not the subject, and
+ * the eye must go to the modules. 1% of 255 resolves to 3/255 on the wire —
+ * dim, but the dimmest value that is still reliably lit. The modules stay at
+ * 100% (SS1_MODULE_PCT); the split between the two IS the visual hierarchy,
+ * which is why the master must stay at 100 and never be used to dim anything. */
+#define SEQ_STRIP_PCT    1u
 
 /* ======================================================================
- * 2. Timings (milliseconds). Calm, legible pace for the demo audience.
+ * 2. SOLID SEQUENCE 1 — the only sequence.
+ *
+ * A hardcoded, deterministic production process: 4 cycles, then STOP. The
+ * physical layout is fixed and must not be changed here.
  * ==================================================================== */
-#define RUN_TIME_MS         20000u  /* how long a module "runs"                */
-#define TRANSFER_ROBOT_MS   20000u  /* ONE robot trip (macro->blender, etc.)   */
-#define TRANSFER_SWIPE_MS   15000u  /* blender -> packaging hand-off           */
-#define EXIT_SWIPE_MS       20000u  /* final "lot shipped" hand-off            */
+
+/* Slots the sequence drives. 0-based indices into MODULE_TYPES / SLOT_LEDS;
+ * the human and BLE number is (index + 1), which is what the requirement calls
+ * "Module 2/3/5/6". */
+#define SS1_SLOT_MACRO         1u   /* "Module 2" — Macro2,      px 49-51 */
+#define SS1_SLOT_GRAVIMETRIC   2u   /* "Module 3" — Gravimetric, px 53-55 */
+#define SS1_SLOT_BLENDER       4u   /* "Module 5" — Blender2,    px 61-62 */
+#define SS1_SLOT_PACKAGING     5u   /* "Module 6" — Packaging,   px 76-77 */
+
+/* Everything else on the board is dark for the whole run. */
+#define SS1_ACTIVE_MASK   ( (1u << SS1_SLOT_MACRO)   | (1u << SS1_SLOT_GRAVIMETRIC) | \
+                            (1u << SS1_SLOT_BLENDER) | (1u << SS1_SLOT_PACKAGING) )
+
+/* Module pixels are ALWAYS full brightness — the strip percentage above never
+ * applies to them. */
+#define SS1_MODULE_PCT       100u
+
+/* Complete production cycles per run. After the last one the sequence parks the
+ * board and enters COMPLETE; it never rolls into another cycle on its own. */
+#define SS1_CYCLES             4u
+
+/* ---- FIXED process durations. The requirement pins these; do not shorten. -- */
+#define SS1_INITIAL_PROCESS_MS   10000u  /* Module 2 + 3 both running at start */
+#define SS1_COLLECTION_MS        10000u  /* robot collecting from a module     */
+#define SS1_DUMP_MS              10000u  /* robot dumping into the blender     */
+
+/* ---- Windows the requirement leaves open. Tune freely. ------------------- */
+/* How far into the macro -> blender dump the gravimetric finishes and goes
+ * GREEN. Must be < SS1_DUMP_MS (asserted in solid_seq1.c). */
+#define SS1_GRAV_READY_AT_MS      5000u
+/* How long the blender runs between "both materials in" (BLUE) and "ready to
+ * ship to packaging" (GREEN). Without a real window here the blender BLUE would
+ * be drawn and overwritten in the same frame and nobody would ever see it. */
+#define SS1_BLEND_RUN_MS         10000u
+/* How long packaging takes to finish after the last material reaches it. */
+#define SS1_PACKAGING_FINISH_MS   5000u
+/* Blank board between cycles, so the reset is something the audience watches
+ * happen rather than a jump cut. */
+#define SS1_CYCLE_GAP_MS          2000u
+
+/* ---- Animation pace ------------------------------------------------------
+ * These are for a client-facing demo watched from 2-3 m away, NOT for an
+ * Arduino LED chase. Slow beats fast every time: the audience must be able to
+ * follow the direction material is moving.
+ *
+ * To retune the whole demo, change the two STEP_MS values and nothing else:
+ *   SLOWER   CHARGE_STEP 600, FLOW_STEP 1000
+ *   NORMAL   CHARGE_STEP 400, FLOW_STEP  700   <- as shipped
+ *   FASTER   CHARGE_STEP 250, FLOW_STEP  450
+ * Every duration below is read in exactly one place, so there are no magic
+ * numbers anywhere in the animation code. */
+
+/* Recharge (Macro 0..5, Gravimetric 0..9): a head crawls from the first
+ * uncharged pixel to the end of the span, then the next chunk latches solid
+ * behind it and the following pass starts further along. */
+#define SS1_CHARGE_STEP_MS         400u  /* dwell on each pixel as the head moves */
+#define SS1_CHARGE_STAGE_MS       1500u  /* pause after a chunk latches solid     */
+#define SS1_CHARGE_CHUNK             2u  /* pixels that go solid per stage        */
+#define SS1_CHARGE_HOLD_MS        1000u  /* hold once the whole span is solid     */
+
+/* Material flow (Blender -> Packaging 14..16, Packaging -> output 17..21): the
+ * span fills one pixel at a time, holds, blanks, and repeats. */
+#define SS1_FLOW_STEP_MS           700u  /* dwell per pixel added, and the full-span hold */
+#define SS1_FLOW_BLANK_MS         1200u  /* all-dark gap before the next pass             */
+#define SS1_FLOW_XFER_PASSES         4u  /* blender -> packaging repeats (fixed by spec)  */
+#define SS1_FLOW_OUTPUT_PASSES       2u  /* packaging -> output repeats                   */
+
+/* Emit RUN:/DONE: module cues to the Android robot as well as the four MOVE:
+ * cues per cycle. Set to 0 for MOVE-only if the app would rather not see them.
+ * The MOVE cues are unconditional either way — they are what drives the arm. */
+#define SS1_EMIT_RUN_DONE            1
+
+/* ======================================================================
+ * 3. Misc.
+ * ==================================================================== */
 #define BUTTON_DEBOUNCE_MS     25u
-
-/* The hand-off fill lights ONE status pixel at a time, spread evenly across
- * TRANSFER_SWIPE_MS. The spans are short (5 px for Blender1 -> Packaging, 3 px
- * for Blender2 -> Packaging), so 15 s gives 3-5 s per pixel: slow enough to
- * read as material flowing rather than as an animation playing. Keep this equal
- * to the Android Timings.TRANSFER_SWIPE_MS.
- *
- * The exit is NOT a status display — it is a flow animation, so it keeps the
- * moving head. It sweeps its 5-pixel run EXIT_FLOW_PASSES times over
- * EXIT_SWIPE_MS and then latches solid. Keep EXIT_SWIPE_MS equal to the Android
- * Timings.EXIT_SWIPE_MS. */
-
-/* How many times the exit head crosses its run before the run latches solid.
- * Fewer passes = a slower, more deliberate sweep. */
-#define EXIT_FLOW_PASSES     5u
-
-/* Fading tail behind the exit head, in pixels. The exit run is only 5 px, so a
- * tail this long makes the whole run one moving gradient rather than a dot.
- * Must satisfy EXIT_FLOW_TAIL + 1 <= LED_OVERLAY_MAX (see led_fx.c). */
-#define EXIT_FLOW_TAIL       4u
-
-/* Set the robot trip time (TRANSFER_ROBOT_MS) to match the Android robot's move
- * animation.
- *
- * Change 11.4: raised 4000 -> 20000 so the arm gets a full ~20 s per trip to
- * play its travel/pick/place/return-home animation legibly (req. point 11.4).
- * This is the ONLY scheduling knob that changes: every LP_XFER trip arms
- * lot->timer with trip_ms (= this) in lotmgr.c, so the whole per-lot schedule —
- * each module's RUN window, the WAIT hand-off, the destination RUN that follows
- * a transfer — shifts with it automatically and stays byte-for-byte in step with
- * what the Android app animates. RUN_TIME_MS is deliberately left at 20 s: the
- * module run pace is unchanged, only the transfer window grows. On a two-source
- * stage (macro + gravimetric -> blender) the robot makes two sequential 20 s
- * trips (~40 s), which is expected and correct. Keep this value equal to the
- * Android Timings.TRANSFER_ROBOT_MS. */
-
-/* ======================================================================
- * 3. Engine limits (implementation detail — invisible to the audience).
- * ==================================================================== */
-#define MAX_LOTS            4    /* concurrent lots the pipeline can hold    */
-#define MAX_PARALLEL        4    /* modules a single stage can occupy        */
-#define MAX_STAGES          4    /* stages in a recipe                       */
 
 #endif /* APP_CONFIG_H */
