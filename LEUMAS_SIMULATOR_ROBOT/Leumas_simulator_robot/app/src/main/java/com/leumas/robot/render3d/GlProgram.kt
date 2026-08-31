@@ -27,6 +27,8 @@ class GlProgram {
     private val uAmbient: Int
     private val uSpecular: Int
     private val uShininess: Int
+    private val uAlpha: Int
+    private val uRim: Int
 
     init {
         val vs = compile(GLES30.GL_VERTEX_SHADER, VERTEX_SRC)
@@ -52,6 +54,8 @@ class GlProgram {
         uAmbient = GLES30.glGetUniformLocation(handle, "uAmbient")
         uSpecular = GLES30.glGetUniformLocation(handle, "uSpecular")
         uShininess = GLES30.glGetUniformLocation(handle, "uShininess")
+        uAlpha = GLES30.glGetUniformLocation(handle, "uAlpha")
+        uRim = GLES30.glGetUniformLocation(handle, "uRim")
     }
 
     fun use() = GLES30.glUseProgram(handle)
@@ -63,7 +67,9 @@ class GlProgram {
     fun setCamera(viewProj: FloatArray, viewPos: FloatArray, lightDir: FloatArray) {
         GLES30.glUniform3fv(uViewPos, 1, viewPos, 0)
         GLES30.glUniform3fv(uLightDir, 1, lightDir, 0)
-        GLES30.glUniform1f(uAmbient, 0.30f)
+        // Change 13.1: the studio backdrop is light, so the scene needs a correspondingly
+        // brighter ambient or the machine reads as a silhouette cut out of the wall.
+        GLES30.glUniform1f(uAmbient, 0.46f)
         pendingViewProj = viewProj
     }
 
@@ -72,7 +78,16 @@ class GlProgram {
     private val normalMat = FloatArray(16)
 
     /** Per-object uniforms, then the caller issues the draw. */
-    fun setModel(model: FloatArray, r: Float, g: Float, b: Float, specular: Float = 0.25f, shininess: Float = 24f) {
+    fun setModel(
+        model: FloatArray,
+        r: Float,
+        g: Float,
+        b: Float,
+        specular: Float = 0.25f,
+        shininess: Float = 24f,
+        alpha: Float = 1f,
+        rim: Float = 0f,
+    ) {
         Matrix.multiplyMM(mvp, 0, pendingViewProj, 0, model, 0)
         // Normal matrix = inverse-transpose of model. For rigid + uniform scale, the model matrix's
         // rotation part suffices; we invert-transpose to stay correct under the small non-uniform
@@ -85,6 +100,8 @@ class GlProgram {
         GLES30.glUniform3f(uColor, r, g, b)
         GLES30.glUniform1f(uSpecular, specular)
         GLES30.glUniform1f(uShininess, shininess)
+        GLES30.glUniform1f(uAlpha, alpha)
+        GLES30.glUniform1f(uRim, rim)
     }
 
     private fun transposeInPlace(m: FloatArray) {
@@ -134,6 +151,8 @@ class GlProgram {
             uniform float uAmbient;
             uniform float uSpecular;
             uniform float uShininess;
+            uniform float uAlpha;   // change 13.8: translucent liquid
+            uniform float uRim;     // change 14.4: Fresnel sheen for metal
             out vec4 fragColor;
             void main() {
                 vec3 n = normalize(vNormal);
@@ -145,7 +164,12 @@ class GlProgram {
                 // A soft fill from the opposite side keeps shadowed faces from going pure black.
                 float fill = max(dot(n, normalize(vec3(0.3, 0.2, 1.0))), 0.0) * 0.18;
                 vec3 color = uColor * (uAmbient + diff * 0.85 + fill) + vec3(spec);
-                fragColor = vec4(color, 1.0);
+                // Change 14.4: a Fresnel rim term. Grazing angles brighten, which is what makes a
+                // surface read as polished metal rather than as flat paint with a highlight on it.
+                // uRim is 0 for every part that does not opt in, so nothing else changes.
+                float fres = pow(1.0 - max(dot(n, v), 0.0), 3.0);
+                color += vec3(0.62, 0.68, 0.78) * fres * uRim;
+                fragColor = vec4(color, uAlpha);
             }
         """
     }

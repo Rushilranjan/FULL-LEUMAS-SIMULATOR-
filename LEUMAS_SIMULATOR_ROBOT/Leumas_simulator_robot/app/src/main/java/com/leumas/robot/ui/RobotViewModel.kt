@@ -13,6 +13,7 @@ import com.leumas.robot.calibration.CalibrationStore
 import com.leumas.robot.calibration.EdgePoint
 import com.leumas.robot.domain.PlantState
 import com.leumas.robot.domain.PlantStateReducer
+import com.leumas.robot.domain.Recipe
 import com.leumas.robot.domain.RobotStateMachine
 import com.leumas.robot.protocol.LineAssembler
 import com.leumas.robot.protocol.McuEvent
@@ -27,6 +28,7 @@ import com.leumas.robot.render3d.Robot3DPoser
 import com.leumas.robot.sim.SimulatedSource
 import com.leumas.robot.sim.TraceStep
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -91,8 +93,31 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
     private val _taskCardDimmed = MutableStateFlow(false)
     val taskCardDimmed: StateFlow<Boolean> = _taskCardDimmed.asStateFlow()
 
+    /**
+     * True while the robot is working the *right* of the arena, where the calibrate/settings panels
+     * live (change 13.4).
+     *
+     * Separate from [taskCardDimmed] on purpose: that one guards the top-left task card, so reusing
+     * it here faded the right-hand panels exactly when the robot was nowhere near them and left them
+     * solid over the arm when it was. Caught on device.
+     */
+    private val _panelsDimmed = MutableStateFlow(false)
+    val panelsDimmed: StateFlow<Boolean> = _panelsDimmed.asStateFlow()
+
+    /**
+     * The sequence-start announcement (change 13.6), or null when none is playing.
+     *
+     * Set the moment `SEQ:<n>` arrives and cleared after [SEQUENCE_INTRO_MS]. It is a pure overlay:
+     * the state machine and the plant reducer are untouched by it, so the real sequence starts
+     * underneath the animation exactly as it always did.
+     */
+    private val _sequenceIntro = MutableStateFlow<SequenceIntro?>(null)
+    val sequenceIntro: StateFlow<SequenceIntro?> = _sequenceIntro.asStateFlow()
+
     private var demoJob: Job? = null
+    private var introJob: Job? = null
     private var lotDoneAtMs: Long = 0L
+    private var introCounter: Long = 0L
 
     init {
         viewModelScope.launch {
@@ -125,17 +150,34 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun apply(event: McuEvent, now: Long) {
         if (event is McuEvent.SequenceStarted) {
-            // Hard reset: abandon any in-flight animation before the state is wiped, and send the
-            // arm home so the next sequence starts from rail centre.
+            // Hard reset: abandon any in-flight animation before the state is wiped. The poser is
+            // told to drop the transfer but keeps its carriage position, so the arm glides home
+            // rather than teleporting to rail centre (change 13.3).
             machine.abort()
             poser3d.reset()
             lotDoneAtMs = 0L
+            startSequenceIntro(event.sequence)
         }
         if (event is McuEvent.LotDone) lotDoneAtMs = now
         if (event is McuEvent.Move && event.kind == TransferKind.ROBOT) {
             machine.submit(event, now)
         }
         _plant.value = PlantStateReducer.reduce(_plant.value, event, now)
+    }
+
+    /** Play the sequence-start glow and recipe card, then clear it (change 13.6). */
+    private fun startSequenceIntro(sequence: Int) {
+        introJob?.cancel()
+        introCounter++
+        _sequenceIntro.value = SequenceIntro(
+            id = introCounter,
+            sequence = sequence,
+            recipe = Recipe.forSequence(sequence),
+        )
+        introJob = viewModelScope.launch {
+            delay(SEQUENCE_INTRO_MS)
+            _sequenceIntro.value = null
+        }
     }
 
     private fun appendLog(now: Long, raw: String, event: McuEvent) {
@@ -161,14 +203,18 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
         _robotStateLabel.value = animation.label
 
         val pose = poser.pose(animation, _calibration.value, geometry)
-        val pose3d = poser3d.pose(animation, _calibration.value)
+        val pose3d = poser3d.pose(animation, _calibration.value, nowMs)
 
         // Change 12.1: fade the top-left task card only while the robot is actually intruding into
         // that corner — i.e. a transfer is running and the carriage sits under the card's horizontal
         // span (left ~42% of the arena, the card's own width). Idle parks the carriage at rail centre
         // so the card is never dimmed at rest, and a right-side transfer leaves it fully opaque.
-        val dim = machine.isBusy && pose.carriageX <= geometry.widthPx * DIM_ZONE_FRACTION
-        if (_taskCardDimmed.value != dim) _taskCardDimmed.value = dim
+        val dimLeft = machine.isBusy && pose.carriageX <= geometry.widthPx * DIM_ZONE_FRACTION
+        if (_taskCardDimmed.value != dimLeft) _taskCardDimmed.value = dimLeft
+
+        val dimRight = machine.isBusy &&
+            pose.carriageX >= geometry.widthPx * (1f - PANEL_ZONE_FRACTION)
+        if (_panelsDimmed.value != dimRight) _panelsDimmed.value = dimRight
 
         // Change 11.1: the blender->packaging / vessel->bottling process transfer is no longer drawn
         // on screen. That handoff is shown entirely by the MCU-controlled LED strip on the physical
@@ -216,10 +262,17 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
         _demoRunning.value = false
     }
 
+    private fun clearSequenceIntro() {
+        introJob?.cancel()
+        introJob = null
+        _sequenceIntro.value = null
+    }
+
     fun resetVisualisation() {
         machine.abort()
         poser3d.reset()
         assembler.reset()
+        clearSequenceIntro()
         lotDoneAtMs = 0L
         _plant.value = PlantState()
         _log.value = emptyList()
@@ -253,6 +306,7 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         super.onCleared()
         stopDemo()
+        clearSequenceIntro()
         ble.release()
     }
 
@@ -265,5 +319,11 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
          * within it during a transfer. See change 12.1 in [tick].
          */
         const val DIM_ZONE_FRACTION = 0.42f
+
+        /**
+         * Right-side fraction of the arena covered by the calibrate/settings panel column. The
+         * panels fade while the carriage is inside it during a transfer.
+         */
+        const val PANEL_ZONE_FRACTION = 0.42f
     }
 }

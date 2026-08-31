@@ -13,7 +13,7 @@ object Timings {
     const val RUN_MS = 20_000L
 
     /** `TRANSFER_ROBOT_MS` — one robot trip. Also the budget our animation must fit inside. */
-    const val TRANSFER_ROBOT_MS = 20_000L
+    const val TRANSFER_ROBOT_MS = 42_000L
 
     /**
      * `TRANSFER_SWIPE_MS` — blender→packaging / vessel→bottling strip hand-off.
@@ -29,16 +29,20 @@ object Timings {
     /**
      * Default duration of one full robot-transfer animation.
      *
-     * Set comfortably under [TRANSFER_ROBOT_MS]. The firmware gives the arm a 20 000 ms budget per
-     * trip (change 11.4: ~15 s of transfer plus a ~3 s return-to-home so the arm parks at rail centre
-     * after every transfer), and on the solid line it sends `MOVE:1>4` and `MOVE:3>4` exactly that far
-     * apart. At 18.5 s the transfer is still deliberately slow and legible for an audience (spec §11),
-     * and the ~1.5 s of slack is deliberate (change 12.2): it absorbs the firmware's render-tick /
-     * UART jitter so two back-to-back trips never overlap and trigger the catch-up speed-up, which
-     * was showing up as a jerk mid-rotation. The arm instead settles at home for a beat before the
-     * next cue. Spec §11 requires this be configurable.
+     * Set comfortably under [TRANSFER_ROBOT_MS]. Change 13.8 raised this from 18.5 s so the arm has
+     * room for a legible material-collection and pour on top of the travel, lift, retract and
+     * return-to-home legs. Change 15.2 raised it again, 32 s -> 40 s: each reach now goes through a
+     * three-coordinate path (transit, approach, target) and comes to rest at the via point, which
+     * the requirement asks for explicitly and which cannot be done gracefully in the old budget. The firmware's per-trip budget moved with it (20 s -> 34 s in
+     * `Core/Inc/config.h`), keeping the ~2 s of slack introduced by change 12.2: that slack absorbs
+     * the controller's render-tick and UART jitter so two back-to-back trips never overlap and
+     * trigger the catch-up speed-up, which used to show up as a jerk mid-rotation. The arm settles
+     * at home for a beat before the next cue instead.
+     *
+     * The user intends to retune the firmware side per sequence later; this constant and
+     * `TRANSFER_ROBOT_MS` must move together. Spec §11 requires it be configurable.
      */
-    const val DEFAULT_ROBOT_ANIMATION_MS = 18_500L
+    const val DEFAULT_ROBOT_ANIMATION_MS = 40_000L
 
     /**
      * Ceiling on how much the animation may be sped up to catch up with a queued transfer.

@@ -13,21 +13,45 @@ import com.leumas.robot.protocol.TransferKind
  * an audience to follow each joint movement, so no phase is allowed to be instantaneous.
  */
 enum class RobotPhase(val fraction: Float) {
-    MOVING_TO_SOURCE(0.17f),
-    POSITIONING_AT_SOURCE(0.07f),
-    PICKING(0.10f),
-    LIFTING(0.06f),
-    MOVING_TO_DESTINATION(0.20f),
-    POSITIONING_AT_DESTINATION(0.06f),
-    PLACING(0.10f),
-    RETRACTING(0.08f),
+    MOVING_TO_SOURCE(0.095f),
+    POSITIONING_AT_SOURCE(0.065f),
+
+    /**
+     * Change 13.8: the arm now holds at the source long enough to play a full material-collection
+     * animation — powder or liquid running into the bucket. At the 32 s budget that is ~7.5 s, up
+     * from the ~1.9 s that only ever read as "the gripper touched something".
+     */
+    PICKING(0.185f),
+
+    /**
+     * Change 13.3: LIFTING and RETRACTING carry the arm between a full extension into a module and
+     * the folded carry/stow pose — the two largest arm movements in the whole choreography. At the
+     * old 0.045 they were also two of the shortest phases, so the arm whipped through them.
+     *
+     * Change 15.2: LIFTING and RETRACTING grew again (to 0.090 and 0.110). Backing out of a
+     * bottom-edge module is the single largest arm movement in the whole choreography — the tool
+     * travels from below the shoulder to the stowed pose above it — and PoseContinuityTest caught the
+     * elbow exceeding its per-frame budget there. The requirement asks for the movement to be slow
+     * and graceful, so the answer was to give the move more time rather than to relax the limit.
+     *
+     * The POSITIONING phases also grew (0.040 -> 0.065). They are no longer a pause
+     * before the reach: the arm now travels to an explicit *approach point* standing off from the
+     * module, comes fully to rest there, and only then goes straight in. That needs real time, and
+     * the requirement asks for the movement to be slow and graceful with a pause at each coordinate.
+     */
+    LIFTING(0.090f),
+    MOVING_TO_DESTINATION(0.105f),
+    POSITIONING_AT_DESTINATION(0.065f),
+
+    /** Change 13.8: the matching pour, same ~6.9 s. */
+    PLACING(0.185f),
+    RETRACTING(0.110f),
 
     /**
      * Post-demo change 10.2: after every transfer the robot travels back to the middle of the rail
-     * (its home/default position) and re-stows before going idle. Roughly 0.16 of the whole
-     * animation ≈ 3 s of the 18 s budget, so the ~15 s that remains is the transfer proper.
+     * (its home/default position) and re-stows before going idle. ~2.6 s of the 32 s budget.
      */
-    RETURNING_HOME(0.16f),
+    RETURNING_HOME(0.100f),
     ;
 
     companion object {
@@ -87,6 +111,7 @@ class RobotStateMachine(
     private var pending: ActiveTransfer? = null
     private var elapsedMs: Float = 0f
     private var lastUpdateMs: Long = UNSET
+    private var catchupFactor: Float = 1f
 
     var droppedTransfers: Int = 0
         private set
@@ -131,9 +156,16 @@ class RobotStateMachine(
         val deltaMs = (nowMs - lastUpdateMs).coerceAtLeast(0L)
         lastUpdateMs = nowMs
 
+        // Change 13.3: ease the catch-up factor in and out rather than switching it. Stepping the
+        // playback rate mid-transfer put a velocity discontinuity into every joint at once, which
+        // read as the arm jerking — one of the reported glitches. With the animation budget now
+        // matched to the firmware's trip time a backlog should never occur at all, but if it does
+        // the speed-up arrives smoothly.
         val catchingUp = pending != null
-        val factor = if (catchingUp) Timings.MAX_CATCHUP_FACTOR else 1f
-        elapsedMs += deltaMs * factor
+        val target = if (catchingUp) Timings.MAX_CATCHUP_FACTOR else 1f
+        val blend = (deltaMs / CATCHUP_RAMP_MS.toFloat()).coerceIn(0f, 1f)
+        catchupFactor += (target - catchupFactor) * blend
+        elapsedMs += deltaMs * catchupFactor
 
         if (elapsedMs >= totalDurationMs) {
             // Robot transfers only, no timeout — see TransferAck.
@@ -186,5 +218,8 @@ class RobotStateMachine(
 
     private companion object {
         const val UNSET = Long.MIN_VALUE
+
+        /** Time constant for easing the catch-up factor in and out. */
+        const val CATCHUP_RAMP_MS = 600L
     }
 }

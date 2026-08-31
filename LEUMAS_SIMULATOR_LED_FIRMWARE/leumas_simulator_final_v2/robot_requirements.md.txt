@@ -1177,9 +1177,37 @@ i ran the demo traces and noted the following observations:
 
 2) THE ROBOT ANIMATIONS ARE STILL NOT SMOOTH, THEY GLICTCH DURING ROTATIONS PLS CHECK 
 
+
+13) robot app changes 
+
+1) robot app background must be a lighter color, it should create a good contrast with the robot's existing color 
+2) the robot right now cannot move to the display corners(diagonal edges) I believe it can only go up or sideways nothing in between those angles
+3) There is always a small glitch when robot tries to move and rotate its arm, fix that. Make the arm motion more smooth and clean and the arm should form a visually aesthetic and smooth arc to collect and drop materials.
+4) like the task bar the calibrate and panels box must go translucent
+5) the robot rail can have more definition: like a moving a screw, more 3d, more visually aesthetic 
+6) when the push button is clicked on the board a new sequence is choosen by  the mcu, every time a new sequence is choosen do this :Create a smooth, premium full-screen edge glow animation inspired by the visual style of iOS 18 Siri.
+Use flowing multicolor gradients—blue, purple, pink, and cyan—with soft blur and seamless movement around the screen edges.
+Keep the center completely transparent; focus only on the fluid, luminous perimeter glow. and then display recipe recived in a luminous visually aesthetic box and then start regular sequence
+7) design a visualy aesthetic progress bar at centre bottom of screen which is capable of displaying multi cycles ( example: 1x,2x,3x)
+8) when robot is collecting from a module show a smooth aesthetic powder collecting animation in a bucket for solid and liquid collecting in a bucket for liquid 
+   - when robot is dispenseing show a liquid/solid pouring from the bucket
+   - this animation can be as long as 10 seconds 
+   - should be visually pleasing 
    
+14) 
+1. make the whole background grey or make it completely even which perfectly contrasts the robot.
+2. whenever robot goes to collect from bottom the arm becomes invisible, make the robot be able to move both sides without disappearing.
+3. the powder and liquid molecules, collection and dispense animation can be made more 3d realistic and aesthesic, the current animation is ass.
+4. the robot bucket can be made to look like actual metal, make it aesthetic and visually pleasing
+5. the robot arm should be fixed and attatched to bucket, clearly parts of arm shouldn't be levitating in free space
+6. reduce the pink color on outer border, let it be blueish luminous and it show stay for atleast 5 seconds and this luminance must stay as close to the border as possible, and reduce the junk shown in middle , just make it say recipe received in big and bold, and show the modules used in bottom with arrows( small font )
+7. the black circular attatchement at the back of the robot isn't attached to robot seems like its levitating in free space fix this 
 
 
+15)
+1. remove the bucket, the robot arm end should have a small vessel (same size as vessel) attached to it at the end. The vessel should have a peristaltic pump at the bottom to dispense solids and liquid molecules. Make the vessel and pump extremely aesthetic and engineering based.
+2. the robot arm looks unnatural while dispensing and travelling to the liquid dispensers at the bottom of the screen, make the movement smooth and aesthetic like a perfect clean arc, all movements should be slow and graceful. Pause between difference coordinates (one arc between 2 modules will have like 3 coordinates)
+3. Do deep analysis and check the mechanics and physics for each motion, do deep research and ensure it aligns with industrial robotic movements.
 
 
 

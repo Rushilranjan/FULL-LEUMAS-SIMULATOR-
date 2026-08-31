@@ -92,7 +92,7 @@ fun ArenaCanvas(
                 if (f.dimRobot) {
                     // Parked during a conveyor transfer: visibly not participating.
                     drawRobot(pose, geometry)
-                    drawRect(LeumasColors.Background.copy(alpha = 0.48f))
+                    drawRect(LeumasColors.Backdrop.copy(alpha = 0.48f))
                 } else {
                     drawRobot(pose, geometry)
                 }
@@ -144,93 +144,27 @@ fun ArenaOverlay(
 }
 
 /**
- * Backdrop: a dark wall above the rail and a receding floor below it.
+ * Backdrop: one flat, even studio tone (change 14.1).
  *
- * The floor grid converges toward a horizon at the rail line, which gives the scene a ground plane
- * for the machine to stand on rather than floating on a flat field.
+ * This used to be a wall gradient over a floor gradient with a receding grid, which left a hard
+ * horizon seam across the arena. The requirement is an even field, so it is now a single fill.
+ *
+ * This is the 2-D fallback path — the GL scene owns the real backdrop — but it is kept in step with
+ * [com.leumas.robot.render3d.SceneRenderer] so the fallback and the pose-preview diagnostics do not
+ * diverge from what ships.
  */
 private fun DrawScope.drawBackdrop(geometry: ArenaGeometry) {
-    val h = geometry.heightPx
-    val w = geometry.widthPx
-    val horizon = geometry.railY - h * 0.02f
-
-    // Wall.
-    drawRect(
-        Brush.verticalGradient(
-            0f to Color(0xFF0A0C0F),
-            1f to Color(0xFF171D24),
-            startY = 0f,
-            endY = horizon,
-        )
-    )
-    // Floor.
-    drawRect(
-        brush = Brush.verticalGradient(
-            0f to Color(0xFF1B222A),
-            1f to Color(0xFF090B0E),
-            startY = horizon,
-            endY = h,
-        ),
-        topLeft = Offset(0f, horizon),
-        size = androidx.compose.ui.geometry.Size(w, h - horizon),
-    )
-
-    // Pool of light behind the machine.
-    drawRect(
-        Brush.radialGradient(
-            0f to Color(0xFF2A3542).copy(alpha = 0.55f),
-            1f to Color.Transparent,
-            center = Offset(w / 2f, horizon),
-            radius = w * 0.55f,
-        )
-    )
-
-    val grid = LeumasColors.Outline.copy(alpha = 0.30f)
-
-    // Receding depth lines, converging on the horizon.
-    val vanishX = w / 2f
-    for (i in -GRID_COLUMNS..GRID_COLUMNS) {
-        val xAtBottom = vanishX + i * (w / GRID_COLUMNS) * 0.62f
-        drawLine(
-            color = grid.copy(alpha = 0.16f),
-            start = Offset(vanishX + (xAtBottom - vanishX) * 0.06f, horizon),
-            end = Offset(xAtBottom, h),
-            strokeWidth = 1f,
-        )
-    }
-
-    // Horizontal rows, spaced so they bunch up toward the horizon.
-    for (i in 1..GRID_ROWS) {
-        val t = (i.toFloat() / GRID_ROWS).pow(2.1f)
-        val y = horizon + (h - horizon) * t
-        drawLine(
-            color = grid.copy(alpha = 0.10f + 0.14f * t),
-            start = Offset(0f, y),
-            end = Offset(w, y),
-            strokeWidth = 1f,
-        )
-    }
-
-    // Horizon glow.
-    drawLine(
-        color = LeumasColors.Info.copy(alpha = 0.10f),
-        start = Offset(0f, horizon),
-        end = Offset(w, horizon),
-        strokeWidth = maxOf(1f, h * 0.002f),
-    )
+    drawRect(LeumasColors.Backdrop)
 }
 
-/** Corner falloff, so attention stays centre-stage. */
-private fun DrawScope.drawVignette(geometry: ArenaGeometry) {
-    drawRect(
-        Brush.radialGradient(
-            0.55f to Color.Transparent,
-            1.0f to Color.Black.copy(alpha = 0.42f),
-            center = Offset(geometry.widthPx / 2f, geometry.railY),
-            radius = geometry.widthPx * 0.72f,
-        )
-    )
-}
+/**
+ * Corner falloff.
+ *
+ * Removed in change 14.1: the backdrop has to be *completely even*, and any vignette is by
+ * definition a gradient across it. Kept as a no-op call site so the draw order is unchanged and the
+ * intent is recorded rather than silently lost.
+ */
+private fun DrawScope.drawVignette(geometry: ArenaGeometry) = Unit
 
 /**
  * Calibration markers.

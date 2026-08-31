@@ -20,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -30,6 +31,7 @@ import com.leumas.robot.ble.DiscoveredDevice
 import com.leumas.robot.protocol.SlotMap
 import com.leumas.robot.sim.WireTrace
 import com.leumas.robot.ui.theme.LeumasColors
+import com.leumas.robot.ui.theme.LeumasGlass
 
 /** Small industrial-looking button. */
 @Composable
@@ -42,8 +44,16 @@ fun ConsoleButton(
 ) {
     Box(
         modifier = modifier
+            // Change 13.4: translucent like the task card, so the controls never block the arena.
             .background(
-                if (selected) accent.copy(alpha = 0.20f) else LeumasColors.SurfaceRaised,
+                if (selected) {
+                    Brush.verticalGradient(
+                        0f to accent.copy(alpha = 0.34f),
+                        1f to accent.copy(alpha = 0.20f),
+                    )
+                } else {
+                    LeumasGlass.button()
+                },
                 RoundedCornerShape(4.dp),
             )
             .border(1.dp, if (selected) accent else LeumasColors.Outline, RoundedCornerShape(4.dp))
@@ -69,8 +79,10 @@ private fun PanelFrame(
 ) {
     Column(
         modifier = modifier
-            .background(LeumasColors.Surface.copy(alpha = 0.95f), RoundedCornerShape(6.dp))
-            .border(1.dp, LeumasColors.Outline, RoundedCornerShape(6.dp))
+            // Change 13.4: the calibration and settings panels used to be effectively opaque and
+            // covered the robot. Same glass as the task card now.
+            .background(LeumasGlass.panel(), RoundedCornerShape(6.dp))
+            .border(1.dp, LeumasColors.Outline.copy(alpha = 0.8f), RoundedCornerShape(6.dp))
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -140,7 +152,10 @@ fun ConnectPanel(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(LeumasColors.SurfaceRaised, RoundedCornerShape(4.dp))
+                            .background(
+                                LeumasColors.SurfaceRaised.copy(alpha = 0.72f),
+                                RoundedCornerShape(4.dp),
+                            )
                             .clickable { onConnect(device) }
                             .padding(horizontal = 10.dp, vertical = 7.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -227,9 +242,9 @@ fun CalibrationPanel(
                     .fillMaxWidth()
                     .background(
                         if (spec.slot == selectedSlot) {
-                            LeumasColors.Info.copy(alpha = 0.18f)
+                            LeumasColors.Info.copy(alpha = 0.22f)
                         } else {
-                            LeumasColors.SurfaceRaised
+                            LeumasColors.SurfaceRaised.copy(alpha = 0.72f)
                         },
                         RoundedCornerShape(4.dp),
                     )

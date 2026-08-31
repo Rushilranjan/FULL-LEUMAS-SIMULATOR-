@@ -67,7 +67,10 @@ class PlantStateReducerTest {
     fun `blender to packaging is recorded as a process transfer not a robot one`() {
         val s = replay("SEQ:1\r\nMOVE:4>6\r\n")
         assertEquals(TransferKind.PROCESS, s.currentTransfer?.kind)
-        assertTrue(s.operationText.startsWith("PROCESS TRANSFER"))
+        // Shortened from "PROCESS TRANSFER" so the line fits the task card on device; the point of
+        // the assertion is that a strip hand-off is not labelled as a robot transfer (spec §14).
+        assertTrue(s.operationText.startsWith("PROCESS"))
+        assertFalse(s.operationText.startsWith("TRANSFERRING"))
     }
 
     @Test

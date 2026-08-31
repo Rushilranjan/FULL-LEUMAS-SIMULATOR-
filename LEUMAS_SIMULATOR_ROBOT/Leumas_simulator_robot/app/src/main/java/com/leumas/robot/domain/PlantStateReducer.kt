@@ -23,20 +23,38 @@ object PlantStateReducer {
          * about module states and any in-flight transfer is now stale. The animation controller is
          * aborted separately by the caller.
          */
-        is McuEvent.SequenceStarted -> PlantState(
-            controllerReady = true,
-            currentSequence = event.sequence,
-        )
+        is McuEvent.SequenceStarted -> {
+            // Change 13.6/13.7: the recipe and the progress bar are both reset here, from the
+            // sequence number alone. Recipe.forSequence is a lookup in a hard-coded table mirroring
+            // the firmware; nothing is being predicted about what the MCU will do next.
+            val recipe = Recipe.forSequence(event.sequence)
+            PlantState(
+                controllerReady = true,
+                currentSequence = event.sequence,
+                recipe = recipe,
+                cycleProgress = CycleProgress.start(recipe),
+            )
+        }
 
         /*
          * Idempotent by construction: the warm-macro path emits RUN twice for the same slot with
          * no DONE in between, so this must be safe to apply repeatedly.
          */
-        is McuEvent.ModuleRun -> state.copy(
-            moduleStates = state.moduleStates + (event.slot to ModuleState.RUNNING),
-            lastRunSlot = event.slot,
-            lotComplete = false,
-        )
+        is McuEvent.ModuleRun -> {
+            val (progress, stage) = CycleProgress.advance(
+                current = state.cycleProgress,
+                recipe = state.recipe,
+                slot = event.slot,
+                previousStage = state.stageIndex,
+            )
+            state.copy(
+                moduleStates = state.moduleStates + (event.slot to ModuleState.RUNNING),
+                lastRunSlot = event.slot,
+                lotComplete = false,
+                cycleProgress = progress,
+                stageIndex = stage,
+            )
+        }
 
         is McuEvent.ModuleDone -> state.copy(
             moduleStates = state.moduleStates + (event.slot to ModuleState.DONE),
@@ -57,6 +75,7 @@ object PlantStateReducer {
         is McuEvent.LotDone -> state.copy(
             lotComplete = true,
             currentTransfer = null,
+            cycleProgress = CycleProgress.finish(state.cycleProgress),
         )
 
         is McuEvent.Unknown -> state

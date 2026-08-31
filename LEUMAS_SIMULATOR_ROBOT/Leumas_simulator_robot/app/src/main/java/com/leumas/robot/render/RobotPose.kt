@@ -224,9 +224,15 @@ class RobotPoser {
 
     private fun yawFacing(dx: Float): Float = if (dx >= 0f) 0f else Math.PI.toFloat()
 
-    /** Folded, upright parking pose. */
+    /**
+     * Folded, upright parking pose.
+     *
+     * The forward offset stays clear of [ArenaGeometry.FOREARM] (0.11H) so the wrist target does
+     * not land on the base axis, where the elbow-up solution folds the arm back over its own
+     * turret. It used to be 0.11H, i.e. exactly on the axis — see [Kinematics.solve].
+     */
     private fun stowTarget(shoulder: Vec2, facing: Float, g: ArenaGeometry) = Vec2(
-        shoulder.x + facing * g.heightPx * 0.11f,
+        shoulder.x + facing * g.heightPx * 0.19f,
         shoulder.y - g.heightPx * 0.21f,
     )
 

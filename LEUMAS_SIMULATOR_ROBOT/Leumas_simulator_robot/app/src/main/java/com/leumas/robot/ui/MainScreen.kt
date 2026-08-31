@@ -3,6 +3,8 @@ package com.leumas.robot.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -31,7 +34,7 @@ import com.leumas.robot.render.ArenaOverlay
 import com.leumas.robot.render.CalibrationOverlay
 import com.leumas.robot.render3d.RobotGlView
 import com.leumas.robot.sim.WireTrace
-import com.leumas.robot.ui.theme.LeumasColors
+import com.leumas.robot.ui.theme.LeumasGlass
 
 /**
  * The main visualisation screen.
@@ -52,8 +55,19 @@ fun MainScreen(viewModel: RobotViewModel) {
     val log by viewModel.log.collectAsState()
     val gattTree by viewModel.gattTree.collectAsState()
     val taskCardDimmed by viewModel.taskCardDimmed.collectAsState()
+    val sequenceIntro by viewModel.sequenceIntro.collectAsState()
+    val panelsDimmed by viewModel.panelsDimmed.collectAsState()
 
     var panelsOpen by rememberSaveable { mutableStateOf(true) }
+
+    // Change 13.4: the controls fade with the same envelope as the task card while the arm is
+    // working behind them, so nothing on the HUD ever competes with the animation. Driven by the
+    // *right*-side flag — these panels sit opposite the task card.
+    val controlsAlpha by animateFloatAsState(
+        targetValue = if (panelsDimmed) LeumasGlass.GHOST_ALPHA else 1f,
+        animationSpec = tween(320),
+        label = "controlsAlpha",
+    )
 
     // The frame holder. Written by the frame loop, read only inside the Canvas draw lambda, so a
     // repaint does not recompose this whole tree.
@@ -127,9 +141,18 @@ fun MainScreen(viewModel: RobotViewModel) {
                 .padding(16.dp),
         )
 
+        // Bottom-centre run progress (change 13.7).
+        CycleProgressBar(
+            progress = plant.cycleProgress,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 16.dp),
+        )
+
         Row(
             modifier = Modifier
                 .align(Alignment.TopEnd)
+                .alpha(controlsAlpha)
                 .padding(12.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -156,6 +179,7 @@ fun MainScreen(viewModel: RobotViewModel) {
             exit = fadeOut(),
             modifier = Modifier
                 .align(Alignment.CenterEnd)
+                .alpha(controlsAlpha)
                 .padding(top = 56.dp, bottom = 12.dp, end = 12.dp),
         ) {
             Column(
@@ -189,6 +213,12 @@ fun MainScreen(viewModel: RobotViewModel) {
                     DebugPanel(log = log, gattTree = gattTree)
                 }
             }
+        }
+
+        // Change 13.6: the sequence-start glow and recipe card sit above the whole HUD. Drawn last
+        // so nothing overlaps them, and non-interactive — the arena keeps running underneath.
+        sequenceIntro?.let { intro ->
+            SequenceIntroOverlay(intro = intro, modifier = Modifier.fillMaxSize())
         }
     }
 }

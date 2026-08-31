@@ -1,6 +1,5 @@
 package com.leumas.robot.render
 
-import com.leumas.robot.calibration.ArenaEdge
 import com.leumas.robot.calibration.EdgePoint
 
 /**
@@ -55,33 +54,37 @@ data class ArenaGeometry(
     fun shoulderAt(carriageX: Float) = Vec2(carriageX, railY - shoulderHeight)
 
     /**
-     * Push an interaction point outward, past its edge, so the gripper ends up off-screen.
+     * Push an interaction point outward, past the boundary, so the gripper ends up off-screen.
      *
      * Spec is explicit that the robot must not merely stop at the boundary — the end effector may
      * and should partially disappear beyond it.
+     *
+     * Change 13.2: the push is radial, away from the centre of the arena, rather than along the
+     * stored edge's axis. A point calibrated into a corner is therefore driven out through the
+     * corner instead of straight up or straight sideways, matching what [Arena3D] does in the 3-D
+     * scene. This drives the calibration preview line, so what the operator is shown while
+     * calibrating is what the arm will actually do.
      */
     fun overshoot(point: EdgePoint): Vec2 {
         val base = toPx(point)
+        val dx = base.x - widthPx / 2f
+        val dy = base.y - heightPx / 2f
+        val length = kotlin.math.hypot(dx, dy)
+        if (length < 1e-3f) return base
         val d = reachOvershoot
-        return when (point.edge) {
-            ArenaEdge.LEFT -> Vec2(base.x - d, base.y)
-            ArenaEdge.RIGHT -> Vec2(base.x + d, base.y)
-            ArenaEdge.TOP -> Vec2(base.x, base.y - d)
-            ArenaEdge.BOTTOM -> Vec2(base.x, base.y + d)
-        }
+        return Vec2(base.x + dx / length * d, base.y + dy / length * d)
     }
 
     /**
      * Where the carriage should park to service [point].
      *
-     * Left/right modules are reached from the corresponding end of the rail; top/bottom modules
-     * are reached from directly beneath them, clamped to the rail's travel.
+     * Directly beneath the point, clamped to the rail's travel — the same rule for every edge
+     * (change 13.2). Left/right modules simply run the carriage out to its limit because they sit
+     * beyond it, which is what leaves the base a diagonal angle to make up.
      */
-    fun carriageXFor(point: EdgePoint): Float = when (point.edge) {
-        ArenaEdge.LEFT -> railMinX
-        ArenaEdge.RIGHT -> railMaxX
-        ArenaEdge.TOP, ArenaEdge.BOTTOM ->
-            (point.position * widthPx).coerceIn(railMinX, railMaxX)
+    fun carriageXFor(point: EdgePoint): Float {
+        val (nx, _) = point.toNormalized()
+        return (nx * widthPx).coerceIn(railMinX, railMaxX)
     }
 
     companion object {
@@ -101,7 +104,15 @@ data class ArenaGeometry(
          * ReachDiagnosticTest measures this for every default slot; if these change, run it.
          */
         const val RAIL_Y_FRACTION = 0.66f
-        const val RAIL_INSET = 0.10f
+
+        /**
+         * Rail travel as an inset from each side of the arena.
+         *
+         * Derived from the 3-D workspace so the two renderers agree on where the carriage can go:
+         * `0.5 * (1 - Arena3D.RAIL_HALF / Arena3D.ARENA_HALF_X)` = `0.5 * (1 - 1.45 / 2.20)`. If
+         * either of those constants moves, move this with it.
+         */
+        const val RAIL_INSET = 0.17f
 
         const val LOWER_ARM = 0.32f
         const val UPPER_ARM = 0.28f

@@ -122,7 +122,7 @@ extern const uint8_t SEQ_CYCLE[SEQ_CYCLE_COUNT];
  * 2. Timings (milliseconds). Calm, legible pace for the demo audience.
  * ==================================================================== */
 #define RUN_TIME_MS         20000u  /* how long a module "runs"                */
-#define TRANSFER_ROBOT_MS   20000u  /* ONE robot trip (macro->blender, etc.)   */
+#define TRANSFER_ROBOT_MS   42000u  /* ONE robot trip (macro->blender, etc.)   */
 #define TRANSFER_SWIPE_MS   15000u  /* blender -> packaging hand-off           */
 #define EXIT_SWIPE_MS       20000u  /* final "lot shipped" hand-off            */
 #define BUTTON_DEBOUNCE_MS     25u
@@ -152,6 +152,20 @@ extern const uint8_t SEQ_CYCLE[SEQ_CYCLE_COUNT];
  *
  * Change 11.4: raised 4000 -> 20000 so the arm gets a full ~20 s per trip to
  * play its travel/pick/place/return-home animation legibly (req. point 11.4).
+ *
+ * Change 13.8: raised again 20000 -> 34000. Requirement 13.8 asks for a visible
+ * powder/liquid collection animation at the source and a matching pour at the
+ * destination, up to ~10 s each. The Android animation is 32 s per trip
+ * (Timings.DEFAULT_ROBOT_ANIMATION_MS) with ~7.5 s of collect and ~7.5 s of
+ * pour; the 2 s of slack here is the same jitter margin change 12.2 introduced,
+ * so two back-to-back trips never overlap. NOTE: this is expected to be retuned
+ * per sequence once the collect/pour pacing is settled on the rig.
+ *
+ * Change 15.2: raised again 34000 -> 42000. Each reach now runs a three-coordinate
+ * path (transit -> approach -> target) and comes fully to rest at the via
+ * point, per requirement 15.2 asking for slow, graceful motion with a pause
+ * between coordinates. The Android animation is 40 s per trip; the 2 s of slack
+ * here is the same jitter margin change 12.2 introduced.
  * This is the ONLY scheduling knob that changes: every LP_XFER trip arms
  * lot->timer with trip_ms (= this) in lotmgr.c, so the whole per-lot schedule —
  * each module's RUN window, the WAIT hand-off, the destination RUN that follows

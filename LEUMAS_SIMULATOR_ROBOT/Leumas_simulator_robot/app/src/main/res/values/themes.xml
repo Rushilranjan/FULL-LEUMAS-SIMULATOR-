@@ -1,8 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!--
+        Change 14.1: the arena is one flat, even grey now, so the window backdrop and the system
+        bars follow it. windowBackground is what shows for the frame before Compose and the GL
+        surface come up; leaving it near-black flashed dark on every launch. The bars are hidden in
+        MainActivity, but a transient swipe still reveals them, so they are given the same light
+        tone with dark icons.
+    -->
     <style name="Theme.LeumasRobot" parent="android:Theme.Material.NoActionBar">
-        <item name="android:statusBarColor">#FF0B0D10</item>
-        <item name="android:navigationBarColor">#FF0B0D10</item>
-        <item name="android:windowBackground">#FF0B0D10</item>
+        <item name="android:statusBarColor">#FFBFC5CC</item>
+        <item name="android:navigationBarColor">#FFBFC5CC</item>
+        <item name="android:windowBackground">#FFBFC5CC</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <!--
+            The arena has to reach the physical edge of the panel. Without this the system letterboxes
+            the window away from the display cutout, which in landscape puts black bars down BOTH
+            sides — so the "edge of the screen is the boundary with the real room" premise breaks and
+            the arm stops short of it. Observed on the TECNO KL4h (Android 14).
+        -->
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
     </style>
 </resources>

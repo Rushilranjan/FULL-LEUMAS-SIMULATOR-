@@ -40,6 +40,7 @@ import com.leumas.robot.ble.BleConnectionState
 import com.leumas.robot.domain.PlantState
 import com.leumas.robot.protocol.TransferKind
 import com.leumas.robot.ui.theme.LeumasColors
+import com.leumas.robot.ui.theme.LeumasGlass
 
 /** Shared card look: dark glass panel, hairline border, left accent bar. */
 @Composable
@@ -80,17 +81,13 @@ private fun AccentCard(
             // left edge. There we skip the intrinsic pin and let the passed height stand.
             .then(if (fillHeight) Modifier else Modifier.height(IntrinsicSize.Min))
             .clip(RoundedCornerShape(corner.dp))
-            .background(
-                Brush.verticalGradient(
-                    0f to Color(0xFF1A2028).copy(alpha = 0.94f),
-                    1f to Color(0xFF0D1116).copy(alpha = 0.94f),
-                )
-            )
+            // Change 13.1/13.4: light glass, shared with every other floating panel.
+            .background(LeumasGlass.panel())
             .border(
                 width = 1.dp,
                 brush = Brush.verticalGradient(
-                    0f to accent.copy(alpha = 0.45f),
-                    1f to LeumasColors.Outline.copy(alpha = 0.65f),
+                    0f to accent.copy(alpha = 0.55f),
+                    1f to LeumasColors.Outline.copy(alpha = 0.75f),
                 ),
                 shape = RoundedCornerShape(corner.dp),
             ),
@@ -137,7 +134,7 @@ fun TaskCard(plant: PlantState, dimmed: Boolean = false, modifier: Modifier = Mo
 
     // Smooth both directions: ghost out as the robot enters the corner, fade back as it leaves.
     val alpha by animateFloatAsState(
-        targetValue = if (dimmed) 0.14f else 1f,
+        targetValue = if (dimmed) LeumasGlass.GHOST_ALPHA else 1f,
         animationSpec = tween(320),
         label = "taskCardAlpha",
     )
