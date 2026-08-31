@@ -66,7 +66,7 @@
  *
  * Left at 100 so the IN-MODULE LEDs are genuinely at full brightness. The two
  * kinds of pixel are then separated by their PER-PIXEL percentage instead of by
- * this one: modules 100%, the status run SEQ_STATUS_PCT (config.h). Dropping
+ * this one: modules SS1_MODULE_PCT, the strip SEQ_STRIP_PCT (config.h). Dropping
  * this below 100 dims both of them together and flattens that split. */
 #define LED_MASTER_PCT_DEFAULT   100
 

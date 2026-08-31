@@ -3,12 +3,10 @@
 #include "led_strip.h"
 #include "led_cmd.h"
 #include "module.h"
-#include "lotmgr.h"
+#include "solid_seq1.h"
 #include "seq_leds.h"
 #include "button.h"
 #include "ble.h"
-
-static uint8_t s_cycle;     /* index into SEQ_CYCLE for the next button press */
 
 void app_init(TIM_HandleTypeDef *led_tim, uint32_t led_ch,
               UART_HandleTypeDef *ble_uart,
@@ -22,8 +20,6 @@ void app_init(TIM_HandleTypeDef *led_tim, uint32_t led_ch,
     button_init();
     module_init();
     ble_ready();
-
-    s_cycle = 0u;
 }
 
 void app_tick(void)
@@ -31,20 +27,21 @@ void app_tick(void)
     /* Take any typed command first. */
     led_cmd_poll();
 
-    /* The button walks SEQ_CYCLE (1 -> 2 -> 4 -> 5 -> 1 ...); `seq <n>` on the
-     * console starts one directly. Either way lotmgr drives the state machine
-     * and the BLE cues, and seq_leds draws whatever state it lands in. */
+    /* There is one sequence and one way in: the board button starts Solid
+     * Sequence 1 from cycle 1, and so does `seq 1` on the console. Pressing it
+     * again mid-demo restarts cleanly. */
     if (button_poll()) {
-        uint8_t seq = SEQ_CYCLE[s_cycle];
-        s_cycle = (uint8_t)((s_cycle + 1u) % SEQ_CYCLE_COUNT);
-        lotmgr_start(seq);
+        solid_seq1_start();
     }
-    lotmgr_tick();
+
+    /* State machine, then renderer, then driver — in that order, so a module
+     * state or a strip pixel set this pass is drawn this pass rather than a
+     * frame late. */
+    solid_seq1_tick();
     seq_leds_tick();
 
-    /* The strip goes out LAST, so a state change made this pass reaches the
-     * LEDs in the same pass rather than a frame late. Exactly one of the LED
-     * command centre and seq_leds has written to it. */
+    /* The strip goes out LAST. Exactly one of the LED command centre and
+     * seq_leds has written to it. */
     led_strip_task();
 }
 

@@ -13,10 +13,10 @@
  *        HAL_TIM_PWM_PulseFinishedCallback -> app_on_pwm_complete
  *        HAL_TIM_ErrorCallback             -> app_on_tim_error
  *
- * The LED strip belongs to the command centre and to nothing else. The sequence
- * engine still runs (it cues the Android robot over BLE when the button is
- * pressed) but it no longer paints a single pixel, so the strip can only ever
- * show what you typed.
+ * The strip has one owner at a time. Normally that is the LED command centre,
+ * so it can only ever show what you typed. Starting Solid Sequence 1 — with the
+ * board button or `seq 1` — hands the strip to seq_leds for the duration of the
+ * demo, and manual paint commands are refused until it is stopped.
  */
 #ifndef APP_APP_H
 #define APP_APP_H

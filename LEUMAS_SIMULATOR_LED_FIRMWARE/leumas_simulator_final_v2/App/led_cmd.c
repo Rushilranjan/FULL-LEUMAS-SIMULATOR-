@@ -2,7 +2,8 @@
 #include "led_strip.h"
 #include "led_fx.h"
 #include "seq_leds.h"
-#include "lotmgr.h"
+#include "solid_seq1.h"
+#include "config.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -145,17 +146,16 @@ static void print_help(void)
     out("  LED any colour makes it solid again.\r\n\r\n");
 
     out("SEQUENCES  - the production demo, cued to the robot over BLE\r\n");
-    out("  seq 1            solid line, ONE blender  -> batch B waits\r\n");
-    out("  seq 2            solid line, TWO blenders -> runs in parallel\r\n");
-    out("  seq 4            liquid line, ONE vessel  -> batch B waits\r\n");
-    out("  seq 5            liquid line, TWO vessels -> runs in parallel\r\n");
+    snprintf(b, sizeof(b), "  seq 1            Solid Sequence 1 - %u cycles, then it stops\r\n",
+             (unsigned)SS1_CYCLES);
+    out(b);
     out("  seq stop         end it and take the strip back\r\n");
     out("  seq map          print the slot -> pixel table\r\n");
-    out("  green = running   yellow = transfer   yellow blinking = waiting\r\n");
-    out("  red = idle        blue = material flow     dark = not in this seq\r\n");
+    out("  seq              which cycle and step it is on\r\n");
+    out("  blue = running    green = done, ready for the robot    dark = off\r\n");
+    out("  strip: WHITE at 1% - recharge and material flow only\r\n");
     out("  While a sequence runs it owns the strip, so paint commands are\r\n");
-    out("  refused until you type 'seq stop'. The board button also cycles\r\n");
-    out("  1 -> 2 -> 4 -> 5.\r\n\r\n");
+    out("  refused until you type 'seq stop'. The board button starts it too.\r\n\r\n");
 
     out("SETUP\r\n");
     out("  count 90         how many LEDs are on the strip\r\n");
@@ -466,18 +466,26 @@ static void cmd_blink(char **argv, int argc)
     out(b);
 }
 
-/* "seq 1|2|4|5" / "seq stop" / "seq map" / "seq" */
+/* "seq 1" / "seq stop" / "seq map" / "seq" */
 static void cmd_seq(char **argv, int argc)
 {
-    char b[80];
+    char b[88];
     uint16_t n;
 
     if (argc == 1) {
-        if (seq_leds_active()) {
-            snprintf(b, sizeof(b), "sequence %u running — 'seq stop' to end it\r\n",
-                     (unsigned)seq_leds_seq());
-        } else {
+        switch (solid_seq1_state()) {
+        case SS1_RUNNING:
+            snprintf(b, sizeof(b), "Solid Sequence 1: cycle %u/%u, step %s\r\n",
+                     (unsigned)solid_seq1_cycle(), (unsigned)SS1_CYCLES,
+                     solid_seq1_step_name());
+            break;
+        case SS1_COMPLETE:
+            snprintf(b, sizeof(b),
+                     "Solid Sequence 1: COMPLETE — 'seq 1' to run it again\r\n");
+            break;
+        default:
             snprintf(b, sizeof(b), "no sequence running — try 'seq 1'\r\n");
+            break;
         }
         out(b);
         return;
@@ -487,7 +495,10 @@ static void cmd_seq(char **argv, int argc)
             out("no sequence running\r\n");
             return;
         }
-        seq_leds_stop();
+        /* Through solid_seq1_stop(), never seq_leds_stop() on its own: the
+         * state machine has to be told, or it keeps ticking unseen and keeps
+         * sending the robot MOVE cues. */
+        solid_seq1_stop();
         out("sequence stopped — the strip is yours again\r\n");
         return;
     }
@@ -495,15 +506,13 @@ static void cmd_seq(char **argv, int argc)
         seq_leds_print_map(out);
         return;
     }
-    if (!parse_u16(argv[1], &n) || (n != 1u && n != 2u && n != 4u && n != 5u)) {
-        out("! sequences are 1, 2, 4 and 5 (3 is deferred)\r\n");
-        out("  1 solid, one blender   2 solid, two blenders\r\n");
-        out("  4 liquid, one vessel   5 liquid, two vessels\r\n");
+    if (!parse_u16(argv[1], &n) || n != 1u) {
+        out("! the only sequence is 1 (Solid Sequence 1)\r\n");
         return;
     }
-    lotmgr_start((uint8_t)n);       /* this calls seq_leds_start() for us */
-    snprintf(b, sizeof(b), "sequence %u started — 'seq stop' for manual control\r\n",
-             (unsigned)n);
+    solid_seq1_start();             /* this calls seq_leds_start() for us */
+    snprintf(b, sizeof(b), "Solid Sequence 1 started, %u cycles — 'seq stop' to end it\r\n",
+             (unsigned)SS1_CYCLES);
     out(b);
 }
 
@@ -623,7 +632,7 @@ static void exec(char *line)
             char sb[56];
             snprintf(sb, sizeof(sb), "sequence %u stopped\r\n",
                      (unsigned)seq_leds_seq());
-            seq_leds_stop();
+            solid_seq1_stop();      /* not seq_leds_stop() — see cmd_seq() */
             out(sb);
         }
         led_fx_stop();
@@ -646,6 +655,7 @@ static void exec(char *line)
         if (argc > 1 && seq_owns_strip()) return;   /* reading it is harmless */
         cmd_count(argv, argc);
     } else if (strcmp(cmd, "power") == 0) {
+        if (argc > 1 && seq_owns_strip()) return;   /* reading it is harmless */
         cmd_power(argv, argc);
     } else if (strcmp(cmd, "status") == 0) {
         print_status();
