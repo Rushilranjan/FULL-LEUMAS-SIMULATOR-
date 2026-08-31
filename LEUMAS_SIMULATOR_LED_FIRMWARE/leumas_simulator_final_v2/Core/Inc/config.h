@@ -111,15 +111,25 @@ extern const SlotLeds SLOT_LEDS[MODULE_COUNT];
  * board and enters COMPLETE; it never rolls into another cycle on its own. */
 #define SS1_CYCLES             4u
 
-/* ---- FIXED process durations. The requirement pins these; do not shorten. -- */
+/* ---- FIXED process durations. The requirement pins these; do not shorten. --
+ *
+ * Change 15.2: COLLECTION and DUMP raised 10000 -> 20000 each, so one carry
+ * (collect + dump, the window a single MOVE cue covers) is 40 s rather than
+ * 20 s. The Android arm animates a three-coordinate reach - transit, approach,
+ * target - coming fully to rest at the via point, which does not read as slow
+ * and graceful in 20 s. Timings.DEFAULT_ROBOT_ANIMATION_MS is 40 s and this is
+ * its firmware-side account of the same carry; the two must move together.
+ * Lengthening only loosens both _Static_asserts in solid_seq1.c. */
 #define SS1_INITIAL_PROCESS_MS   10000u  /* Module 2 + 3 both running at start */
-#define SS1_COLLECTION_MS        10000u  /* robot collecting from a module     */
-#define SS1_DUMP_MS              10000u  /* robot dumping into the blender     */
+#define SS1_COLLECTION_MS        20000u  /* robot collecting from a module     */
+#define SS1_DUMP_MS              20000u  /* robot dumping into the blender     */
 
 /* ---- Windows the requirement leaves open. Tune freely. ------------------- */
 /* How far into the macro -> blender dump the gravimetric finishes and goes
- * GREEN. Must be < SS1_DUMP_MS (asserted in solid_seq1.c). */
-#define SS1_GRAV_READY_AT_MS      5000u
+ * GREEN. Must be < SS1_DUMP_MS (asserted in solid_seq1.c). Scaled with the
+ * 15.2 dump change (5000 -> 10000) to hold it at the dump midpoint, so the
+ * green lands at the same place in the rhythm as before. */
+#define SS1_GRAV_READY_AT_MS     10000u
 /* How long the blender runs between "both materials in" (BLUE) and "ready to
  * ship to packaging" (GREEN). Without a real window here the blender BLUE would
  * be drawn and overwritten in the same frame and nobody would ever see it. */
