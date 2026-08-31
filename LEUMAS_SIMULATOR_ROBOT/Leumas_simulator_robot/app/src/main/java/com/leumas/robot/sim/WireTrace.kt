@@ -6,14 +6,18 @@ data class TraceStep(val atMs: Long, val messages: List<String>)
 /**
  * Scripted wire traces for development without hardware.
  *
- * Timings are derived from the firmware's `Core/Inc/config.h` constants (`RUN_TIME_MS` 20 s,
- * `TRANSFER_ROBOT_MS` 42 s, `TRANSFER_SWIPE_MS` 15 s, `EXIT_SWIPE_MS` 20 s).
+ * STALE - these traces predate the firmware's Solid Sequence 1 rewrite and have NOT been
+ * rebuilt yet. They still script the old world in three ways:
  *
- * Change 15.2 respaced every robot `MOVE` to 42 s apart, following the firmware's raised trip
- * budget (change 13.8 had moved it from 20 s to 34 s). The one shared arm therefore never overlaps trips or triggers catch-up: the
- * animation budget ([com.leumas.robot.protocol.Timings.DEFAULT_ROBOT_ANIMATION_MS], 40 s) fits
- * inside a trip with ~2 s to spare, so the arm finishes its collect, dispense and return-to-home and
- * settles at rail centre before the next cue. Each trace runs a **complete** sequence, from the
+ *  - sequences 2, 4 and 5 no longer exist; `seq` now accepts only 1
+ *  - the slot mapping changed: SS1 cues `MOVE:2>5` and `MOVE:3>5`, not `MOVE:1>4` / `3>4`
+ *  - `MOVE` cues are spaced 42 s here; the firmware carry is now exactly 40 s
+ *    ([com.leumas.robot.protocol.Timings.CARRY_MS]), and the swipe/exit windows moved too
+ *    (blender->packaging 15 s -> 13.2 s, exit 20 s -> 9.4 s)
+ *
+ * Simulator-only, so nothing on the rig depends on it, but a replay will not match real
+ * hardware until SOLID_1 is rewritten against the SS1 step chain and the other traces are
+ * deleted. See `App/solid_seq1.c` for the authoritative order of cues. Each trace runs a **complete** sequence, from the
  * opening `SEQ:n` through to `LOT:DONE`, so the whole animation can be reviewed end to end without
  * hardware.
  *

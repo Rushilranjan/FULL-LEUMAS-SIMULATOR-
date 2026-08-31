@@ -96,8 +96,8 @@ data class RobotAnimationState(
  * older pending transfer is *dropped* and counted in [droppedTransfers] — dropping the stale one
  * keeps the visualisation closest to what the MCU is currently doing.
  *
- * **Catch-up.** On the solid line the firmware sends `MOVE:1>4` then `MOVE:3>4` exactly
- * [Timings.TRANSFER_ROBOT_MS] apart. Whenever something is pending, animated time advances up to
+ * **Catch-up.** On the solid line the firmware sends `MOVE:2>5` then `MOVE:3>5` exactly
+ * [Timings.CARRY_MS] apart. Whenever something is pending, animated time advances up to
  * [Timings.MAX_CATCHUP_FACTOR]× faster so the backlog drains. The factor is capped, so a backlog
  * degrades to "brisk" and never to a teleport — spec §10 forbids the robot jumping.
  *
