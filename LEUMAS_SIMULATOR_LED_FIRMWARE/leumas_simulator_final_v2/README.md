@@ -67,10 +67,21 @@ One rule decides what is lit at all: a module the running sequence uses gets a c
 is dark. That covers the idle line *and* the deliberately-missing unit — Blender2 in Seq 1, Vessel2 in
 Seq 4 — so "add a module" in Seq 2/5 literally shows up as a pixel that was dark lighting up.
 
-The status run fills solid **white** up to a module the moment that module is completely done with the
+The status run fills solid **blue** up to a module the moment that module is completely done with the
 lot; fills are cumulative and never go backwards within a run. The mid→final hand-off (blender →
-packaging, vessel → bottling) is a moving white point, and the ship-out is a looping flow along the
-exit run that then latches solid and stays lit.
+packaging, vessel → bottling) lights **one status LED at a time**, spread evenly over the whole
+transfer, and the ship-out is a looping flow along the exit run that then latches solid and stays lit.
+
+Status and modules are deliberately **two different brightnesses on the one strip**: the in-module
+pixels run at **100 %** and the status run at **`SEQ_STATUS_PCT` (10 %)**, both as per-pixel
+percentages over a master of 100. The modules are the subject; the status run is the line drawn
+between them, and at equal brightness it competes with them for attention. Lowering the master
+instead would dim both together and lose the distinction.
+
+The fill and the exit are drawn differently on purpose. The **fill is a readout** — it means "the line
+is complete this far", so it advances one pixel at a time and never lights a pixel that is not yet
+true. The **exit is an animation** — it means "the lot is leaving", carries no per-pixel meaning, and
+is free to be a moving head with a fading tail (`EXIT_FLOW_PASSES` sweeps over `EXIT_SWIPE_MS`).
 
 ## Starting a sequence
 Either type `seq 1`, `seq 2`, `seq 4` or `seq 5` on the console, or press the board button, which walks
@@ -385,11 +396,14 @@ void HAL_TIM_ErrorCallback(TIM_HandleTypeDef *htim)     { app_on_tim_error(htim)
    while Blender1 is busy. The whole liquid line and status 22-43 stay dark.
 10. `seq 2` — Blender2 now lights, and nothing blinks: no wait.
 11. `seq 4` / `seq 5` — the same story on the liquid line; the solid line and status 0-21 stay dark.
-12. **Exit** — a flow animation runs along 17-21 (or 39-43), then latches solid white and stays lit.
+12. **Exit** — a flow animation sweeps 17-21 (or 39-43) five times over 20 s, then latches solid and
+    stays lit.
 13. `red 20 30` mid-sequence → refused with the `seq stop` message, strip unchanged. `seq stop` → the
     strip blanks and manual commands work again.
 14. **BLE** — `READY / SEQ:n / RUN / MOVE / DONE / LOT:DONE` still arrive at the same moments, so the
-    Android robot stays in step. Time the 20 s / 10 s phases with a stopwatch.
+    Android robot stays in step. Time the 20 s run / 15 s hand-off / 20 s exit phases with a
+    stopwatch. `TRANSFER_SWIPE_MS` and `EXIT_SWIPE_MS` must match the Android `Timings.kt`, or the
+    app's conveyor and exit visuals finish early and drift out of step with the strip.
 
 ## To tune / finish before the demo
 - **`App/led_strip.h`** is the one LED tuning block: `LED_COUNT_DEFAULT` (90), `LED_MASTER_PCT_DEFAULT`

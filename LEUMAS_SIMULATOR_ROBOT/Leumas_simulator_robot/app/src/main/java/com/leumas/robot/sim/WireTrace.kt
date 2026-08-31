@@ -8,7 +8,7 @@ data class TraceStep(val atMs: Long, val messages: List<String>)
  *
  * Timings are derived from the firmware's `Core/Inc/config.h` constants (`RUN_TIME_MS` 20 s,
  * `TRANSFER_ROBOT_MS` 20 s — change 11.4: ~17 s transfer + ~3 s return-to-home,
- * `TRANSFER_SWIPE_MS` / `EXIT_SWIPE_MS` 10 s). Robot `MOVE`s are therefore spaced 20 s apart so the
+ * `TRANSFER_SWIPE_MS` 15 s, `EXIT_SWIPE_MS` 20 s). Robot `MOVE`s are therefore spaced 20 s apart so the
  * one shared arm never overlaps trips or triggers catch-up — the animation budget
  * ([Timings.DEFAULT_ROBOT_ANIMATION_MS], 18.5 s) fits inside that with ~1.5 s to spare, so the arm
  * settles at home before the next cue instead of speeding up. They are *representative*, not exact:
@@ -34,10 +34,10 @@ object WireTrace {
         TraceStep(40_040, listOf("MOVE:3>4")),    // robot, 20 s — arrives exactly 20 s after the last
         TraceStep(60_040, listOf("RUN:4")),
         TraceStep(80_040, listOf("DONE:4")),
-        TraceStep(80_080, listOf("MOVE:4>6")),    // strip swipe, 10 s — must NOT move the arm
-        TraceStep(90_080, listOf("RUN:6")),
-        TraceStep(110_080, listOf("DONE:6")),
-        TraceStep(110_120, listOf("LOT:DONE")),   // start of the 10 s exit swipe
+        TraceStep(80_080, listOf("MOVE:4>6")),    // strip swipe, 15 s — must NOT move the arm
+        TraceStep(95_080, listOf("RUN:6")),
+        TraceStep(115_080, listOf("DONE:6")),
+        TraceStep(115_120, listOf("LOT:DONE")),   // start of the 20 s exit flow
     )
 
     /** Sequence 2 — two blenders, so both batches flow with no bottleneck wait. */
@@ -49,14 +49,15 @@ object WireTrace {
         TraceStep(60_040, listOf("RUN:4")),       // blender1 fed
         TraceStep(60_080, listOf("MOVE:2>5")),    // robot, +20 s after 3>4
         TraceStep(80_040, listOf("DONE:4")),
-        TraceStep(80_080, listOf("MOVE:4>6")),    // blender1 -> packaging swipe
+        TraceStep(80_080, listOf("MOVE:4>6")),    // blender1 -> packaging swipe, 15 s (ends 95_080)
         TraceStep(80_120, listOf("MOVE:3>5")),    // robot, +20 s after 2>5
         TraceStep(100_120, listOf("RUN:5")),      // blender2 fed
         TraceStep(120_120, listOf("DONE:5")),
-        TraceStep(120_160, listOf("MOVE:5>6")),   // blender2 -> packaging swipe
-        TraceStep(130_160, listOf("RUN:6")),      // packaging runs once both blenders are in
-        TraceStep(150_160, listOf("DONE:6")),
-        TraceStep(150_200, listOf("LOT:DONE")),
+        TraceStep(120_160, listOf("MOVE:5>6")),   // blender2 -> packaging swipe; the strip mover
+                                                  // is long free by now, so this is not delayed
+        TraceStep(135_160, listOf("RUN:6")),      // packaging runs once both blenders are in
+        TraceStep(155_160, listOf("DONE:6")),
+        TraceStep(155_200, listOf("LOT:DONE")),
     )
 
     /** Sequence 4 — the liquid line with a single vessel. Exercises slots 7..11. */
@@ -66,10 +67,10 @@ object WireTrace {
         TraceStep(20_040, listOf("MOVE:7>9")),    // robot, 20 s
         TraceStep(40_040, listOf("RUN:9")),
         TraceStep(60_040, listOf("DONE:9")),
-        TraceStep(60_080, listOf("MOVE:9>11")),   // strip swipe — no arm
-        TraceStep(70_080, listOf("RUN:11")),
-        TraceStep(90_080, listOf("DONE:11")),
-        TraceStep(90_120, listOf("LOT:DONE")),
+        TraceStep(60_080, listOf("MOVE:9>11")),   // strip swipe, 15 s — no arm
+        TraceStep(75_080, listOf("RUN:11")),
+        TraceStep(95_080, listOf("DONE:11")),
+        TraceStep(95_120, listOf("LOT:DONE")),
     )
 
     /** Sequence 5 — two vessels in parallel. Exercises slot 10. */
@@ -80,11 +81,12 @@ object WireTrace {
         TraceStep(40_040, listOf("MOVE:8>10")),   // robot, +20 s
         TraceStep(60_040, listOf("RUN:9", "RUN:10")),
         TraceStep(80_040, listOf("DONE:9", "DONE:10")),
-        TraceStep(80_080, listOf("MOVE:9>11")),   // vessel1 -> bottling swipe
-        TraceStep(90_080, listOf("MOVE:10>11")),  // vessel2 -> bottling swipe
-        TraceStep(100_080, listOf("RUN:11")),
-        TraceStep(120_080, listOf("DONE:11")),
-        TraceStep(120_120, listOf("LOT:DONE")),
+        TraceStep(80_080, listOf("MOVE:9>11")),   // vessel1 -> bottling swipe, 15 s
+        TraceStep(95_080, listOf("MOVE:10>11")),  // vessel2 waits its FIFO turn on the one strip
+                                                  // mover, so it starts as the first one ends
+        TraceStep(110_080, listOf("RUN:11")),
+        TraceStep(130_080, listOf("DONE:11")),
+        TraceStep(130_120, listOf("LOT:DONE")),
     )
 
     /**

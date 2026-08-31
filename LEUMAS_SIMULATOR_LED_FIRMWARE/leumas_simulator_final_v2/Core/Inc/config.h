@@ -73,6 +73,14 @@ extern const SlotLeds SLOT_LEDS[MODULE_COUNT];
  * idle modules are as bright as the working ones. */
 #define SEQ_IDLE_PCT   100u
 
+/* Brightness of the status run, in percent. The status LEDs are context, not
+ * the subject: kept well under the modules so the eye goes to the working
+ * module rather than to the line between them. Applied as a PER-PIXEL
+ * percentage, so it is independent of the module pixels, which stay at 100%.
+ * The master (LED_MASTER_PCT_DEFAULT in led_strip.h) is 100 precisely so this
+ * split is the only thing separating the two. */
+#define SEQ_STATUS_PCT  10u
+
 /* Sequence 1 (single-blender bottleneck demo). Active slots:
  *   1 = Macro1, 2 = Macro2, 3 = Gravimetric, 4 = Blender1, 6 = Packaging.
  * Blender2 (slot 5) is intentionally LEFT OUT so both batches must share the
@@ -115,9 +123,29 @@ extern const uint8_t SEQ_CYCLE[SEQ_CYCLE_COUNT];
  * ==================================================================== */
 #define RUN_TIME_MS         20000u  /* how long a module "runs"                */
 #define TRANSFER_ROBOT_MS   20000u  /* ONE robot trip (macro->blender, etc.)   */
-#define TRANSFER_SWIPE_MS   10000u  /* blender -> packaging hand-off           */
-#define EXIT_SWIPE_MS       10000u  /* final "lot shipped" hand-off            */
+#define TRANSFER_SWIPE_MS   15000u  /* blender -> packaging hand-off           */
+#define EXIT_SWIPE_MS       20000u  /* final "lot shipped" hand-off            */
 #define BUTTON_DEBOUNCE_MS     25u
+
+/* The hand-off fill lights ONE status pixel at a time, spread evenly across
+ * TRANSFER_SWIPE_MS. The spans are short (5 px for Blender1 -> Packaging, 3 px
+ * for Blender2 -> Packaging), so 15 s gives 3-5 s per pixel: slow enough to
+ * read as material flowing rather than as an animation playing. Keep this equal
+ * to the Android Timings.TRANSFER_SWIPE_MS.
+ *
+ * The exit is NOT a status display — it is a flow animation, so it keeps the
+ * moving head. It sweeps its 5-pixel run EXIT_FLOW_PASSES times over
+ * EXIT_SWIPE_MS and then latches solid. Keep EXIT_SWIPE_MS equal to the Android
+ * Timings.EXIT_SWIPE_MS. */
+
+/* How many times the exit head crosses its run before the run latches solid.
+ * Fewer passes = a slower, more deliberate sweep. */
+#define EXIT_FLOW_PASSES     5u
+
+/* Fading tail behind the exit head, in pixels. The exit run is only 5 px, so a
+ * tail this long makes the whole run one moving gradient rather than a dot.
+ * Must satisfy EXIT_FLOW_TAIL + 1 <= LED_OVERLAY_MAX (see led_fx.c). */
+#define EXIT_FLOW_TAIL       4u
 
 /* Set the robot trip time (TRANSFER_ROBOT_MS) to match the Android robot's move
  * animation.

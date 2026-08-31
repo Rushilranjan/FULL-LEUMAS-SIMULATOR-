@@ -62,8 +62,13 @@
  * ~60 mA, so 90 pixels of white is ~5.4 A — far beyond any USB port. A 90 pixel
  * strip NEEDS ITS OWN 5V SUPPLY (2-3 A), with its ground tied to the Nucleo's
  * GND. Feeding it from the Nucleo's 5V pin browns out the far end of the strip
- * and looks exactly like a data/index bug. */
-#define LED_MASTER_PCT_DEFAULT   30
+ * and looks exactly like a data/index bug.
+ *
+ * Left at 100 so the IN-MODULE LEDs are genuinely at full brightness. The two
+ * kinds of pixel are then separated by their PER-PIXEL percentage instead of by
+ * this one: modules 100%, the status run SEQ_STATUS_PCT (config.h). Dropping
+ * this below 100 dims both of them together and flattens that split. */
+#define LED_MASTER_PCT_DEFAULT   100
 
 /* Current budget in milliamps for the whole strip. If a frame would exceed it,
  * the WHOLE frame is scaled down proportionally (colours keep their hue) before

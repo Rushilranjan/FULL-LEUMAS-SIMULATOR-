@@ -30,9 +30,30 @@
  * "adding a module" in Seq 2/5 literally shows up as a pixel that was dark
  * lighting up.
  *
- * The status run fills solid WHITE up to a module the moment that module is
+ * The status run fills solid BLUE up to a module the moment that module is
  * completely done with the lot. Fills are cumulative and monotonic: a pixel that
  * has been latched never goes dark again until the sequence restarts.
+ *
+ * ---------------------------------------------------------------------------
+ * TWO BRIGHTNESSES, ONE STRIP
+ * ---------------------------------------------------------------------------
+ * The in-module pixels run at 100% and the status run at SEQ_STATUS_PCT (10%),
+ * both as PER-PIXEL percentages over a master of 100. The modules are the
+ * subject; the status run is the line drawn between them, and at equal
+ * brightness it competes with them for attention. Lowering the master instead
+ * would dim both together and lose the distinction.
+ *
+ * ---------------------------------------------------------------------------
+ * STATUS IS A READOUT, THE EXIT IS AN ANIMATION
+ * ---------------------------------------------------------------------------
+ * These are deliberately different things and are drawn differently:
+ *
+ *   status fill  ONE pixel at a time, evenly across the whole transfer. It says
+ *                "the line is complete this far", so it must be readable at a
+ *                glance and must never light a pixel that is not yet true.
+ *   exit flow    a moving head with a fading tail, looping. It says "the lot is
+ *                leaving" and carries no per-pixel meaning, so it is free to be
+ *                a flow animation. It uses led_fx; the status fill does not.
  */
 #ifndef APP_SEQ_LEDS_H
 #define APP_SEQ_LEDS_H
@@ -59,21 +80,24 @@ void seq_leds_tick(void);
 
 /* ---- hooks, called by lotmgr at the transfer-completion points ----------- */
 
-/* Latch the status run solid white up to the end of `slot`'s segment. Called
+/* Latch the status run solid blue up to the end of `slot`'s segment. Called
  * when that module is COMPLETELY done — its material has left and it will not
  * be used again this run. Cumulative; only ever adds pixels. */
 void seq_leds_fill_upto(uint8_t slot);
 
-/* Run the moving-white hand-off from `from_slot` to `to_slot` over `ms`
- * (blender -> packaging, vessel -> bottling). When it ends the run is left
- * solid white only as far as `keep_slot`:
+/* Fill the hand-off span from `from_slot` to `to_slot` over `ms` (blender ->
+ * packaging, vessel -> bottling), lighting exactly ONE pixel at a time so the
+ * span takes the whole of `ms` to complete. When it ends the run is left solid
+ * blue only as far as `keep_slot`:
  *   keep_slot == from_slot  -> clear the span again (another batch follows)
  *   keep_slot == to_slot    -> keep all of it (this was the final ship)
  * Anything in between keeps up to that module. */
 void seq_leds_swipe(uint8_t from_slot, uint8_t to_slot, uint32_t ms, uint8_t keep_slot);
 
 /* The "lot shipped" flow: a continuous looping animation along the line's exit
- * run for `ms`, which then latches solid white and stays lit. */
+ * run for `ms`, which then latches solid blue and stays lit. Unlike the fill
+ * above this IS an animation — a head with a fading tail, EXIT_FLOW_PASSES
+ * sweeps over the run. */
 void seq_leds_exit_flow(uint8_t from_slot, uint32_t ms);
 
 /* Print the slot -> pixel table over the console, flagging anything that falls

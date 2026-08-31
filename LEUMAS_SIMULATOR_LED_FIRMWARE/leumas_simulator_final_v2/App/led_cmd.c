@@ -152,7 +152,7 @@ static void print_help(void)
     out("  seq stop         end it and take the strip back\r\n");
     out("  seq map          print the slot -> pixel table\r\n");
     out("  green = running   yellow = transfer   yellow blinking = waiting\r\n");
-    out("  red = idle        white = material flow    dark = not in this seq\r\n");
+    out("  red = idle        blue = material flow     dark = not in this seq\r\n");
     out("  While a sequence runs it owns the strip, so paint commands are\r\n");
     out("  refused until you type 'seq stop'. The board button also cycles\r\n");
     out("  1 -> 2 -> 4 -> 5.\r\n\r\n");

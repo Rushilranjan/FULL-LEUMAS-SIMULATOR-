@@ -110,7 +110,7 @@ static int stage_using(ModType t)
  * still at/before the stage that uses `t` will need one. Decides when a SHARED
  * unit (the single gravimetric, or Seq-1's one blender) is finally done and its
  * status run may light — and whether a mid->final hand-off is the last one, so
- * its white bar should stay. */
+ * its status bar should stay. */
 static bool type_needed_again(ModType t, const Lot *self)
 {
     if (s_pending > 0) return true;
@@ -140,7 +140,7 @@ static bool is_last_lot(const Lot *self)
 /* Is this lot's middle-stage ship (blender->packaging, or vessel->bottling) the
  * FINAL use of that shared unit? A consumed middle module (Seq 2/5, two of them)
  * is used once; a single one (Seq 1/4) is final only when no other lot still
- * needs one. Drives whether the hand-off keeps its white bar (final) or clears
+ * needs one. Drives whether the hand-off keeps its status bar (final) or clears
  * it for the next batch. The type is taken at runtime from the module being
  * shipped, so this works for both the blender and the vessel. */
 static bool mid_ship_final(const Lot *self)

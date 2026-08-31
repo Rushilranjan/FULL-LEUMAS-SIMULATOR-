@@ -57,8 +57,8 @@ object SlotMap {
      * robot trips and strip swipes produce byte-identical messages. Destination role is the
      * only reliable discriminator:
      *
-     *  - dst is a BLENDER or VESSEL  -> `XFER_ROBOT`,  4000 ms, animate the arm
-     *  - dst is PACKAGING or BOTTLING -> `XFER_SWIPE`, 10000 ms, conveyor band, no arm
+     *  - dst is a BLENDER or VESSEL  -> `XFER_ROBOT`,  20000 ms, animate the arm
+     *  - dst is PACKAGING or BOTTLING -> `XFER_SWIPE`, 15000 ms, conveyor band, no arm
      *
      * Anything else is unexpected. We return [TransferKind.PROCESS] for it, because spec §29
      * forbids inventing robot movement — a wrong conveyor animation is a far smaller lie than

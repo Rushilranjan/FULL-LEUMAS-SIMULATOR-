@@ -15,11 +15,16 @@ object Timings {
     /** `TRANSFER_ROBOT_MS` — one robot trip. Also the budget our animation must fit inside. */
     const val TRANSFER_ROBOT_MS = 20_000L
 
-    /** `TRANSFER_SWIPE_MS` — blender→packaging / vessel→bottling strip swipe. */
-    const val TRANSFER_SWIPE_MS = 10_000L
+    /**
+     * `TRANSFER_SWIPE_MS` — blender→packaging / vessel→bottling strip hand-off.
+     *
+     * The firmware fills this span one status LED at a time, evenly across the whole window, so
+     * the conveyor band here must last exactly as long or the two visibly drift apart.
+     */
+    const val TRANSFER_SWIPE_MS = 15_000L
 
-    /** `EXIT_SWIPE_MS` — the final "lot shipped" swipe, started by `LOT:DONE`. */
-    const val EXIT_SWIPE_MS = 10_000L
+    /** `EXIT_SWIPE_MS` — the final "lot shipped" flow, started by `LOT:DONE`. */
+    const val EXIT_SWIPE_MS = 20_000L
 
     /**
      * Default duration of one full robot-transfer animation.
