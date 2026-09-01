@@ -2,7 +2,7 @@
 #include "led_strip.h"
 #include "led_fx.h"
 #include "seq_leds.h"
-#include "solid_seq1.h"
+#include "solid_seq.h"
 #include "ble.h"
 #include "config.h"
 #include <stdio.h>
@@ -470,22 +470,26 @@ static void cmd_blink(char **argv, int argc)
 /* "seq 1" / "seq stop" / "seq map" / "seq" */
 static void cmd_seq(char **argv, int argc)
 {
-    char b[88];
+    char b[104];
     uint16_t n;
 
     if (argc == 1) {
-        switch (solid_seq1_state()) {
+        switch (solid_seq_state()) {
         case SS1_RUNNING:
-            snprintf(b, sizeof(b), "Solid Sequence 1: cycle %u/%u, step %s\r\n",
-                     (unsigned)solid_seq1_cycle(), (unsigned)SS1_CYCLES,
-                     solid_seq1_step_name());
+            snprintf(b, sizeof(b), "Solid Sequence %u: cycle %u/%u, step %s\r\n",
+                     (unsigned)solid_seq_running(),
+                     (unsigned)solid_seq_cycle(), (unsigned)SS1_CYCLES,
+                     solid_seq_step_name());
             break;
         case SS1_COMPLETE:
             snprintf(b, sizeof(b),
-                     "Solid Sequence 1: COMPLETE — 'seq 1' to run it again\r\n");
+                     "Solid Sequence %u: COMPLETE — 'seq %u' to run it again\r\n",
+                     (unsigned)solid_seq_running(), (unsigned)solid_seq_running());
             break;
         default:
-            snprintf(b, sizeof(b), "no sequence running — try 'seq 1'\r\n");
+            snprintf(b, sizeof(b),
+                     "no sequence running — button selects, 'seq %u' runs it now\r\n",
+                     (unsigned)solid_seq_selected());
             break;
         }
         out(b);
@@ -496,10 +500,10 @@ static void cmd_seq(char **argv, int argc)
             out("no sequence running\r\n");
             return;
         }
-        /* Through solid_seq1_stop(), never seq_leds_stop() on its own: the
+        /* Through solid_seq_stop(), never seq_leds_stop() on its own: the
          * state machine has to be told, or it keeps ticking unseen and keeps
          * sending the robot MOVE cues. */
-        solid_seq1_stop();
+        solid_seq_stop();
         out("sequence stopped — the strip is yours again\r\n");
         return;
     }
@@ -507,13 +511,19 @@ static void cmd_seq(char **argv, int argc)
         seq_leds_print_map(out);
         return;
     }
-    if (!parse_u16(argv[1], &n) || n != 1u) {
-        out("! the only sequence is 1 (Solid Sequence 1)\r\n");
+    if (!parse_u16(argv[1], &n) || n == 0u || n > SOLID_SEQ_COUNT) {
+        snprintf(b, sizeof(b), "! sequence must be 1..%u\r\n",
+                 (unsigned)SOLID_SEQ_COUNT);
+        out(b);
         return;
     }
-    solid_seq1_start();             /* this calls seq_leds_start() for us */
-    snprintf(b, sizeof(b), "Solid Sequence 1 started, %u cycles — 'seq stop' to end it\r\n",
-             (unsigned)SS1_CYCLES);
+    /* The bench path: run one outright, without the app's select-then-START.
+     * It also moves the selection, so what the button offers next follows
+     * what was last run rather than contradicting it. */
+    solid_seq_start((uint8_t)n);   /* this calls seq_leds_start() for us */
+    snprintf(b, sizeof(b),
+             "Solid Sequence %u started, %u cycles — 'seq stop' to end it\r\n",
+             (unsigned)n, (unsigned)SS1_CYCLES);
     out(b);
 }
 
@@ -631,8 +641,13 @@ static void exec(char *line)
          * the sequence without starting it, so the app's recipe card and START
          * button can be exercised without reaching for the rig. Same one call
          * the button makes -- deliberately not a second code path. */
-        ble_recipe(SS1_SEQ_NUMBER);
-        out("RECIPE sent — the app should show the recipe and offer START\r\n");
+        char rb[80];
+        solid_seq_select_next();
+        ble_recipe(solid_seq_selected());
+        snprintf(rb, sizeof(rb),
+                 "RECIPE:%u sent — the app should offer START\r\n",
+                 (unsigned)solid_seq_selected());
+        out(rb);
     } else if (strcmp(cmd, "ble") == 0) {
         /* Did anything the app sent actually get here? See ble.h. */
         char bb[96];
@@ -648,7 +663,7 @@ static void exec(char *line)
             char sb[56];
             snprintf(sb, sizeof(sb), "sequence %u stopped\r\n",
                      (unsigned)seq_leds_seq());
-            solid_seq1_stop();      /* not seq_leds_stop() — see cmd_seq() */
+            solid_seq_stop();      /* not seq_leds_stop() — see cmd_seq() */
             out(sb);
         }
         led_fx_stop();

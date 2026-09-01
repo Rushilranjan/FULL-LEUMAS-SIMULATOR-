@@ -94,13 +94,22 @@ extern const SlotLeds SLOT_LEDS[MODULE_COUNT];
 /* Slots the sequence drives. 0-based indices into MODULE_TYPES / SLOT_LEDS;
  * the human and BLE number is (index + 1), which is what the requirement calls
  * "Module 2/3/5/6". */
+/* Sequence 2 adds the two solid modules sequence 1 never touched: macro 1 and
+ * blender 1. Names are the rig's, not a sequence's -- both sequences index the
+ * same physical line. */
+#define SS1_SLOT_MACRO1        0u   /* "Module 1" — Macro1,      px 45-47 */
+#define SS1_SLOT_BLENDER1      3u   /* "Module 4" — Blender1,    px 57-58 */
 #define SS1_SLOT_MACRO         1u   /* "Module 2" — Macro2,      px 49-51 */
 #define SS1_SLOT_GRAVIMETRIC   2u   /* "Module 3" — Gravimetric, px 53-55 */
 #define SS1_SLOT_BLENDER       4u   /* "Module 5" — Blender2,    px 61-62 */
 #define SS1_SLOT_PACKAGING     5u   /* "Module 6" — Packaging,   px 76-77 */
 
 /* Everything else on the board is dark for the whole run. */
-#define SS1_ACTIVE_MASK   ( (1u << SS1_SLOT_MACRO)   | (1u << SS1_SLOT_GRAVIMETRIC) | \
+/* Every solid-line module a sequence may light. Sequence 1 uses four of these
+ * and sequence 2 uses all six; the mask is the union, because it exists to keep
+ * the LIQUID line dark rather than to describe any one sequence. */
+#define SS1_ACTIVE_MASK   ( (1u << SS1_SLOT_MACRO1)   | (1u << SS1_SLOT_MACRO)        | \
+                            (1u << SS1_SLOT_GRAVIMETRIC) | (1u << SS1_SLOT_BLENDER1)  | \
                             (1u << SS1_SLOT_BLENDER) | (1u << SS1_SLOT_PACKAGING) )
 
 /* Module pixels are ALWAYS full brightness — the strip percentage above never
@@ -254,6 +263,11 @@ extern const SlotLeds SLOT_LEDS[MODULE_COUNT];
  * The gravimetric span is 10 pixels against the macro's 6, so it fills at a
  * faster per-pixel rate — otherwise it would drag — while still taking
  * slightly longer overall. Both facts are asserted in solid_seq1.c. */
+/* Macro 1's status run is only two pixels (0..1 -- the fills are cumulative, so
+ * the first module on the line has the shortest). A slower per-pixel dwell keeps
+ * its recharge from being over before the eye finds it, while still leaving it
+ * the quickest of the three, which is what the map says it should be. */
+#define SS1_CHARGE_FILL_MACRO1_MS  700u  /* per pixel, 2-pixel span           */
 #define SS1_CHARGE_FILL_MACRO_MS   420u  /* per pixel, 6-pixel span           */
 /* Change 12.3: eased off from 300 — the gravimetric was reading as a flicker
  * over ten pixels. Still quicker per pixel than the macro, and still the longer

@@ -21,10 +21,10 @@ data class RecipeStage(
  * rig knowledge mirrored from the firmware so the app can describe what it is watching, while the
  * MCU stays the sole source of truth for *when* anything happens.
  *
- * Mirrors `App/solid_seq1.c` and the `SS1_*` constants in `Core/Inc/config.h`. The firmware rewrite
- * replaced the lot manager with a single hardcoded sequence, so sequences 2, 4 and 5 no longer
- * exist - `seq` accepts only 1 - and the liquid line has no sequence at all yet. The liquid slot
- * map is still in the firmware config awaiting one; add its recipe here when it lands.
+ * Mirrors `App/solid_seq.c` and the `SS1_*` constants in `Core/Inc/config.h`. Change 20 turned
+ * that file into a small engine driven by a per-sequence table, so there are two solid sequences
+ * again and the board button cycles between them. The liquid line still has none: its slot map is
+ * in the firmware config awaiting one, and its recipe belongs here when it lands.
  */
 data class Recipe(
     val sequence: Int,
@@ -58,6 +58,23 @@ data class Recipe(
             RecipeStage("PACKAGING", listOf(6)),
         )
 
+        /**
+         * Solid Sequence 2 drives the whole solid line: both macros, the gravimetric, both
+         * blenders and packaging.
+         *
+         * Two blend lines running in parallel, sharing one gravimetric - macro 1 and the
+         * gravimetric make blender 1's batch, macro 2 and the gravimetric make blender 2's, and
+         * packaging waits for both before it ships a lot. Written as three stages rather than the
+         * five the arm actually performs, because the two lines are concurrent: showing them
+         * sequentially would misdescribe the process and would make the progress bar step twice
+         * for what is really one stage.
+         */
+        private val SS2_STAGES = listOf(
+            RecipeStage("MACRO 1 + 2 + GRAVIMETRIC", listOf(1, 2, 3)),
+            RecipeStage("BLENDER 1 + 2", listOf(4, 5)),
+            RecipeStage("PACKAGING", listOf(6)),
+        )
+
         val ALL: Map<Int, Recipe> = linkedMapOf(
             1 to Recipe(
                 sequence = 1,
@@ -68,12 +85,22 @@ data class Recipe(
                 stages = SS1_STAGES,
                 activeSlots = listOf(2, 3, 5, 6),
             ),
+            2 to Recipe(
+                sequence = 2,
+                name = "SOLID SEQUENCE 2",
+                lesson = "Four cycles on the whole solid line: two blend lines run in parallel " +
+                    "sharing one gravimetric, and packaging ships a lot once both are in.",
+                line = ProductionLine.SOLID,
+                stages = SS2_STAGES,
+                activeSlots = listOf(1, 2, 3, 4, 5, 6),
+            ),
         )
 
         /**
          * Recipe for a sequence number, or null if the MCU announced one we do not know.
          *
-         * Only sequence 1 exists in the firmware today. An unknown number is shown as-is elsewhere
+         * Sequences 1 and 2 exist in the firmware; the board button cycles between them and
+         * announces the choice with `RECIPE:<n>`. An unknown number is shown as-is elsewhere
          * rather than discarded, but there is no card to draw for it.
          */
         fun forSequence(sequence: Int): Recipe? = ALL[sequence]

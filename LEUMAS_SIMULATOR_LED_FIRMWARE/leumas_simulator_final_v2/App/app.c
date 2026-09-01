@@ -3,7 +3,7 @@
 #include "led_strip.h"
 #include "led_cmd.h"
 #include "module.h"
-#include "solid_seq1.h"
+#include "solid_seq.h"
 #include "seq_leds.h"
 #include "button.h"
 #include "ble.h"
@@ -51,17 +51,22 @@ void app_tick(void)
      * Starting from the app also pins t=0 on both sides, so its arm animation
      * and the board's colour changes begin from the same instant instead of
      * the app inferring the start from whichever cue it caught first. */
+    /* Change 20.2: the button CHOOSES. Each press advances to the next sequence
+     * and announces it, so the app shows that recipe and offers START; pressing
+     * again before starting simply moves on to the next one. Nothing lights up
+     * either way -- selecting is not running. */
     if (button_poll()) {
-        ble_recipe(SS1_SEQ_NUMBER);
+        solid_seq_select_next();
+        ble_recipe(solid_seq_selected());
     }
     if (ble_take_start()) {
-        solid_seq1_start();
+        solid_seq_start(solid_seq_selected());
     }
 
     /* State machine, then renderer, then driver — in that order, so a module
      * state or a strip pixel set this pass is drawn this pass rather than a
      * frame late. */
-    solid_seq1_tick();
+    solid_seq_tick();
     seq_leds_tick();
 
     /* The strip goes out LAST. Exactly one of the LED command centre and
