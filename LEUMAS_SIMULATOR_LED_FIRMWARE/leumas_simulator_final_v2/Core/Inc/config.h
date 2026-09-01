@@ -299,7 +299,7 @@ extern const SlotLeds SLOT_LEDS[MODULE_COUNT];
  * it, before going dark again to wait for the rest of the batch. Long enough to
  * read as "that went in", short enough not to become the stale lit module that
  * change 16.4 removed. */
-#define SS1_RECEIVE_ACK_MS        2000u
+#define SS1_RECEIVE_ACK_MS        5000u
 
 /* Emit RUN:/DONE: module cues to the Android robot as well as the four MOVE:
  * cues per cycle. Set to 0 for MOVE-only if the app would rather not see them.

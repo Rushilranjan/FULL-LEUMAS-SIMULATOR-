@@ -134,23 +134,29 @@ _Static_assert(SS1_CHARGE_FILL_GRAV_MS < SS1_CHARGE_FILL_MACRO_MS,
 _Static_assert(SS1_GRAV_CHARGE_MS > SS1_MACRO_CHARGE_MS,
                "the gravimetric recharge must still take slightly longer overall");
 
-/* A feeder has to be green again by the time the arm gets back to it, two
- * carries later: recharge, then produce, then ready. The recharge starts at the
- * dump of its own carry (SS1_ARM_AT_DEST_MS into it) and the arm is stood in
- * front of it again SS1_ARM_TO_SOURCE_MS into the carry after next. */
-_Static_assert(SS1_MACRO_CHARGE_MS + SS1_INITIAL_PROCESS_MS
-                   < 2u * SS1_T_CARRY + SS1_ARM_TO_SOURCE_MS - SS1_ARM_AT_DEST_MS,
-               "the macro must be green again before the arm arrives back for it");
+/* A released feeder must be green before the arm is stood in front of it. The
+ * release lands at S_CARRY_HOME of the previous carry and the arm arrives
+ * SS1_ARM_TO_SOURCE_MS into the next one, so this is the gap between those. */
+_Static_assert(SS1_ARM_DUMP_END_MS < SS1_T_CARRY + SS1_ARM_TO_SOURCE_MS,
+               "a feeder must be released before the arm arrives to collect it");
 
-/* Change 13.1: the gravimetric no longer greens on its own — it stands blue
- * holding its batch until the arm dumps the MACRO into the blender. That cue
- * lands one carry after the gravimetric's own dump, so its recharge and its
- * produce must both fit inside a single carry. Miss this and the release
- * arrives while the module is still producing, feeder_release() no-ops, and the
- * gravimetric never goes green at all — a silent visual failure that no test on
- * the bench would catch, which is exactly what an assert is for. */
-_Static_assert(SS1_GRAV_CHARGE_MS + SS1_INITIAL_PROCESS_MS < SS1_T_CARRY,
-               "the gravimetric must be holding before the macro dump releases it");
+/* Changes 13.1 / 18.5: neither feeder greens on its own any more. Each stands
+ * blue holding its batch until the OTHER one's pour finishes. That cue lands at
+ * S_CARRY_HOME of the next carry, so counting from where a feeder starts its
+ * own recharge -- S_CARRY_DUMP of its own carry -- the window is one whole carry
+ * plus the run from dump-arrival to pour-complete.
+ *
+ * Miss this and the release arrives while the module is still producing,
+ * feeder_release() no-ops, and that feeder never goes green at all: the arm
+ * collects from a blue module and the batch is invisible. A silent visual
+ * failure no bench test would catch, which is exactly what an assert is for. */
+#define SS1_RELEASE_WINDOW_MS  ( SS1_T_CARRY + SS1_ARM_DUMP_END_MS              \
+                               - SS1_ARM_AT_DEST_MS )
+
+_Static_assert(SS1_GRAV_CHARGE_MS + SS1_INITIAL_PROCESS_MS < SS1_RELEASE_WINDOW_MS,
+               "the gravimetric must be holding before the macro's pour releases it");
+_Static_assert(SS1_MACRO_CHARGE_MS + SS1_INITIAL_PROCESS_MS < SS1_RELEASE_WINDOW_MS,
+               "the macro must be holding before the gravimetric's pour releases it");
 
 /* Change 13.3: packaging has no queue and no second slot — one lot has to be
  * out of the door before the next lot's second material lands in the blender,
@@ -309,6 +315,8 @@ typedef struct {
 
 typedef enum {
     S_IDLE = 0,
+    S_PRIME_MACRO,   /* change 18.2: strip fills toward the macro, board dark  */
+    S_PRIME_GRAV,    /* then toward the gravimetric                            */
     S_INIT,          /* both feeders producing; macro will green, gravi holds */
     S_CARRY_MOVE,    /* MOVE cue out; arm travelling, then stood collecting   */
     S_CARRY_CROSS,   /* source dark — the arm has lifted away and is crossing */
@@ -320,8 +328,9 @@ typedef enum {
 } Ss1Step;
 
 static const char *const SS1_STEP_NAME[S_STEP_COUNT] = {
-    "IDLE",       "INIT",       "CARRY_MOVE", "CARRY_CROSS",
-    "CARRY_DUMP", "CARRY_HOME", "ARM_DONE",   "COMPLETE"
+    "IDLE",        "PRIME_MACRO", "PRIME_GRAV", "INIT",
+    "CARRY_MOVE",  "CARRY_CROSS", "CARRY_DUMP", "CARRY_HOME",
+    "ARM_DONE",    "COMPLETE"
 };
 
 /* ---- feeder actor -------------------------------------------------------- */
@@ -825,11 +834,13 @@ static void ss1_reset_transient(void)
     ss1_charge_reset(&s_charge);
     ss1_flow_reset(&s_flow_xfer);
     ss1_flow_reset(&s_flow_out);
-    /* Change 13.1: the macro greens as soon as it has produced; the
-     * gravimetric holds blue until the macro's material goes into the blender.
-     * That asymmetry is the whole of 13.1, and it lives here in one bool. */
+    /* Changes 13.1 / 18.5: BOTH feeders hold now. Each goes green only when the
+     * other's material has finished going into the blender, so they alternate
+     * and neither is ever green out of turn. The macro's first green is the one
+     * exception, and it is granted explicitly when S_INIT completes -- there is
+     * no previous dispense to wait on. */
     feeder_init(&s_macro, SS1_SLOT_MACRO, SS1_MACRO_A, SS1_MACRO_B,
-                SS1_CHARGE_FILL_MACRO_MS, false);
+                SS1_CHARGE_FILL_MACRO_MS, true);
     feeder_init(&s_grav, SS1_SLOT_GRAVIMETRIC, SS1_GRAV_A, SS1_GRAV_B,
                 SS1_CHARGE_FILL_GRAV_MS, true);
     blender_reset();
@@ -865,10 +876,30 @@ static void enter_step(Ss1Step s)
      * This step is entered ONCE per run. The old S_FEEDERS_READY, which forced
      * both modules green together, was exactly what 13.1 forbids, and it is
      * gone rather than patched. */
-    case S_INIT:
+    /* Change 18.2: the run opens by charging the two feeders on the strip, one
+     * after the other, over a completely dark board. The modules light only
+     * once BOTH fills have finished -- so the operator sees the plant being
+     * primed and then coming alive together, rather than two modules simply
+     * being on when the demo starts.
+     *
+     * Sequential because it has to be: the macro's 0..5 is a subset of the
+     * gravimetric's 0..9, there is one animator, and the two cannot share the
+     * strip. Macro first, as the sequence itself runs macro first. */
+    case S_PRIME_MACRO:
         ss1_reset_transient();
         set_mod(SS1_SLOT_BLENDER,   MOD_OFF);
         set_mod(SS1_SLOT_PACKAGING, MOD_OFF);
+        ss1_charge_start(&s_charge, SS1_MACRO_A, SS1_MACRO_B,
+                         SS1_SLOT_MACRO, SS1_CHARGE_FILL_MACRO_MS);
+        break;
+
+    case S_PRIME_GRAV:
+        ss1_charge_start(&s_charge, SS1_GRAV_A, SS1_GRAV_B,
+                         SS1_SLOT_GRAVIMETRIC, SS1_CHARGE_FILL_GRAV_MS);
+        break;
+
+    /* Both primed: now they light, together, and start producing. */
+    case S_INIT:
         feeder_producing(&s_macro);
         feeder_producing(&s_grav);
         s_carry = 1u;
@@ -914,14 +945,6 @@ static void enter_step(Ss1Step s)
         if (s_carry + SS1_CARRIES_PER_CYCLE <= SS1_TOTAL_CARRIES) {
             feeder_recharge(carry_source());
         }
-        /* Change 13.1: "module 3 turns green once the robot dumps module 2's
-         * material into module 5" — this instant, and only on the macro's
-         * carries. feeder_release() is a no-op on anything not actually
-         * holding, but the test is written out because the macro dump IS the
-         * requirement and a bare unconditional call would hide it. */
-        if (carry_source() == &s_macro) {
-            feeder_release(&s_grav);
-        }
         ms = SS1_T_DUMP_HOLD;
         break;
 
@@ -932,6 +955,22 @@ static void enter_step(Ss1Step s)
      * never lands while the previous animation is still playing. */
     case S_CARRY_HOME:
         blender_material_in();
+        /* Changes 13.1 / 18.4 / 18.5: a feeder goes green only once the OTHER
+         * one's material has finished going into the blender. The two take it
+         * in turns, and neither is ever green for a batch the plant is not
+         * ready for.
+         *
+         * 13.1 asked for this one way round (the gravimetric waiting on the
+         * macro); 18.5 asked for the mirror, so the rule is now symmetric and
+         * is written that way rather than as two special cases. It fires HERE,
+         * at the end of the pour, not at S_CARRY_DUMP where the arm merely
+         * arrives -- "once the material is dispensed" is the requirement, and
+         * that is when the pour finishes.
+         *
+         * feeder_release() no-ops on a feeder that is not holding, so the very
+         * first carry -- where the macro was released by S_INIT and the
+         * gravimetric has yet to produce -- needs no special case either. */
+        feeder_release((carry_source() == &s_macro) ? &s_grav : &s_macro);
         ms = SS1_T_GO_HOME;
         break;
 
@@ -977,7 +1016,7 @@ void solid_seq1_start(void)
     s_status = SS1_RUNNING;
     s_cycle  = 1u;
     s_lots   = 0u;
-    enter_step(S_INIT);
+    enter_step(S_PRIME_MACRO);
 }
 
 void solid_seq1_stop(void)
@@ -1018,11 +1057,20 @@ void solid_seq1_tick(void)
     packaging_tick();
 
     switch (s_step) {
-    /* The arm leaves for the first carry when the macro is actually green, not
-     * when a clock says it ought to be — so the produce time can be retuned in
-     * config.h without the first MOVE drifting off the module colour. */
+    /* Change 18.2: the two priming fills, each waiting on the shared animator
+     * rather than on a clock, so retuning SS1_CHARGE_FILL_* cannot desync them. */
+    case S_PRIME_MACRO:
+    case S_PRIME_GRAV:
+        advance = ss1_charge_done(&s_charge);
+        break;
+
+    /* The arm leaves for the first carry when the macro has finished producing,
+     * not when a clock says it ought to be — so the produce time can be retuned
+     * in config.h without the first MOVE drifting off the module colour. Both
+     * feeders hold now (18.5), so this waits on FD_HELD and the release is
+     * granted in the transition below. */
     case S_INIT:
-        advance = (s_macro.phase == FD_READY);
+        advance = (s_macro.phase == FD_HELD);
         break;
 
     /* The one place the arm waits on the plant, and only because it has nothing
@@ -1048,7 +1096,19 @@ void solid_seq1_tick(void)
     }
 
     switch (s_step) {
+    case S_PRIME_MACRO:
+        enter_step(S_PRIME_GRAV);
+        break;
+
+    case S_PRIME_GRAV:
+        enter_step(S_INIT);
+        break;
+
     case S_INIT:
+        /* The one green nobody dispensed for: the run has to start somewhere,
+         * and the macro is where. Every green after this is released by the
+         * other feeder's pour finishing (18.4 / 18.5). */
+        feeder_release(&s_macro);
         enter_step(S_CARRY_MOVE);
         break;
 
