@@ -406,35 +406,49 @@ class Robot3DPoser {
     }
 
     /**
-     * Drive in to a module: dwell at the approach point, then a straight line to the target.
+     * Drive in to a module: one continuous move along the reach axis, from the approach point to
+     * the target.
      *
      * The straight final segment is the point — it runs along the reach axis, which is how an
-     * industrial machine enters a station. The arm has already been brought to the approach point
-     * and stopped during the POSITIONING phase, so this begins from rest, holds, and then makes one
-     * clean short move in. That hold is the pause requirement 15.2 asks for between coordinates.
+     * industrial machine enters a station.
+     *
+     * **Change 19.1 removed the hold at the approach point.** 15.2 asked for a pause at each
+     * coordinate and got a literal one: a third of the drive-in window was spent standing still,
+     * and with the same distance then crammed into the remaining two thirds the move also had to
+     * be faster. It read as stutter-then-lunge rather than as a machine. Real controllers do not
+     * stop at a via point either — they blend through it — so the arm now uses the whole window
+     * for one smooth accelerate-and-settle. The move is *slower* than before as well as
+     * continuous, because it has half again as much time to cover the same distance.
      *
      * Progress is scaled by [REACH_RAMP] and clamped, so the arm is fully in position well before
      * the material starts to flow at [FLOW_START] and simply stays there for the rest of the phase.
      */
     private fun approachPath(approach: Vec2, target: Vec2, progress: Float): Vec2 {
         val t = (progress / REACH_RAMP).coerceIn(0f, 1f)
-        if (t < DWELL_START) return approach
-        return lerp(approach, target, sCurve((t - DWELL_START) / (1f - DWELL_START)))
+        return lerp(approach, target, sCurve(t))
     }
 
     /**
-     * Back out of a module: straight line out to the approach point, dwell, then arc away to the
-     * transit pose. The mirror of [approachPath], and the third coordinate of the move.
+     * Back out of a module: straight out along the reach axis to the approach point, then an arc
+     * away to the transit pose. The mirror of [approachPath], and the third coordinate of the move.
+     *
+     * **Change 19.1: one velocity profile across both legs, and no dwell between them.** Each leg
+     * used to ease itself, which forces the arm to a dead stop at the via point — an [sCurve] ends
+     * at zero velocity — and a further hold was parked on top of that. Easing the whole move once
+     * and then splitting it by distance means the corner is taken at speed, which is what a
+     * continuous-path move through a via point actually looks like. The arm still comes to rest at
+     * each end of the move, because that is where it genuinely stops.
+     *
+     * The sub-parameters are deliberately linear now. Applying [sCurve] per leg *and* over the
+     * whole move would compound the two profiles and spike the speed at each leg's midpoint —
+     * which is the bug the old comment here was warning about, from the other direction.
      */
     private fun retractPath(target: Vec2, approach: Vec2, transit: Vec2, progress: Float): Vec2 {
-        // Takes RAW phase progress, not an eased value: each segment applies its own [sCurve], and
-        // feeding an already-eased input compounds the two profiles and makes the segment run far
-        // faster than intended at its midpoint.
-        val t = progress.coerceIn(0f, 1f)
-        return when {
-            t < RETRACT_OUT -> lerp(target, approach, sCurve(t / RETRACT_OUT))
-            t < RETRACT_DWELL -> approach
-            else -> arc(approach, transit, sCurve((t - RETRACT_DWELL) / (1f - RETRACT_DWELL)))
+        val t = sCurve(progress.coerceIn(0f, 1f))
+        return if (t < RETRACT_OUT) {
+            lerp(target, approach, t / RETRACT_OUT)
+        } else {
+            arc(approach, transit, (t - RETRACT_OUT) / (1f - RETRACT_OUT))
         }
     }
 
@@ -483,12 +497,16 @@ class Robot3DPoser {
         /** Fraction of a collect/dispense phase spent driving the arm in before the flow starts. */
         const val REACH_RAMP = 0.38f
 
-        /** Fraction of the drive-in window spent dwelling at the approach point before going in. */
-        const val DWELL_START = 0.34f
-
-        /** Split points of the retract: straight out, then dwell, then arc away. */
-        const val RETRACT_OUT = 0.40f
-        const val RETRACT_DWELL = 0.52f
+        /**
+         * Where the retract stops going straight out and starts arcing away, as a fraction of the
+         * move's own eased clock (change 19.1).
+         *
+         * The dwell that used to sit between the two legs is gone — see [retractPath] — so this is
+         * now a split point rather than the first of three. Distance-weighted by eye: the straight
+         * segment out of the module is much shorter than the arc to transit, so it gets the
+         * smaller share and the two legs run at roughly the same speed through the corner.
+         */
+        const val RETRACT_OUT = 0.34f
 
         /** Window inside PICKING/PLACING during which material actually flows. */
         const val FLOW_START = 0.42f

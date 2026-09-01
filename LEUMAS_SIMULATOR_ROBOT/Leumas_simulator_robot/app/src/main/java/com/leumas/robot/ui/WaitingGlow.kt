@@ -38,11 +38,18 @@ import kotlin.math.abs
  * matter how far the alpha was pushed. Brightness was never the problem — *contrast along the
  * border* was.
  *
- * So the border is now mostly dim, and a single concentrated head of light travels around it,
- * dragging a long tail behind. Because the dim base gives the head something to move against, the
- * motion is unmistakable at a glance, and it reads as current flowing through a circuit rather than
- * as a wheel being spun. The head is short and the tail is roughly five times longer, which is what
- * makes the direction obvious: a symmetric blob would look the same going either way.
+ * So the border is mostly dim, and a concentrated head of light travels around it, dragging a long
+ * tail behind. Because the dim base gives the head something to move against, the motion is
+ * unmistakable at a glance, and it reads as current flowing through a circuit rather than as a
+ * wheel being spun. The head is short and the tail far longer, which is what makes the direction
+ * obvious: a symmetric blob would look the same going either way.
+ *
+ * **Change 19.3: one current, not two.** A second head on a different period kept the far corners
+ * lit, but two smaller lights chasing each other read as decoration — and worse, they crossed, and
+ * at the moment they passed there were briefly no corners dark at all and the whole effect
+ * flattened. A single head is unambiguous: there is one thing moving, it is large, and you can
+ * follow it the whole way round. It is bigger and brighter than either of the two it replaces, and
+ * its tail is long enough to keep most of the perimeter alive on its own.
  *
  * Clockwise falls out of the geometry: [Brush.sweepGradient] puts stop 0 at the 3 o'clock position
  * and increases clockwise in screen coordinates, so advancing the head's position advances it
@@ -60,72 +67,60 @@ fun WaitingEdgeGlow(modifier: Modifier = Modifier) {
 
     val transition = rememberInfiniteTransition(label = "waitGlow")
 
-    // One lap of the border. Restart, never Reverse: a current does not run backwards, and
-    // Reverse here would read as the light sloshing rather than flowing.
+    // One lap of the border, clockwise. Restart, never Reverse: a current does not run backwards,
+    // and Reverse here would read as the light sloshing rather than flowing.
+    //
+    // Change 19.3 slowed the lap from 2.8 s. One large head crossing the screen is far more
+    // legible than two small ones were, so it no longer needs speed to be noticed — and a slower,
+    // larger sweep is the calmer, more deliberate motion the requirement asks for.
     val head by transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(2_800, easing = LinearEasing),
+            animation = tween(3_400, easing = LinearEasing),
             repeatMode = androidx.compose.animation.core.RepeatMode.Restart,
         ),
         label = "waitHead",
     )
 
-    // A second head on the far side of the border, running at a different rate. Two of them keep
-    // the whole perimeter alive -- with one, the far corners sit dark for most of a lap -- and
-    // because the rates differ they drift through each other instead of holding formation.
-    val second by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(4_300, easing = LinearEasing),
-            repeatMode = androidx.compose.animation.core.RepeatMode.Restart,
-        ),
-        label = "waitHead2",
-    )
-
     Box(modifier.fillMaxSize()) {
         // Soft bloom: carries the head's light away from the edge so it glows into the screen.
+        // Wider than the two-head version was -- one light has to do all the work now, and this is
+        // the pass that gives it presence rather than just brightness.
         CurrentPass(
             head = head,
-            second = second,
-            blur = shortEdge * 0.038f,
-            stroke = shortEdge * 0.062f,
-            alpha = 0.85f,
+            blur = shortEdge * 0.050f,
+            stroke = shortEdge * 0.082f,
+            alpha = 0.90f,
         )
         // Crisp core, hugging the border so the outline itself stays sharp.
         CurrentPass(
             head = head,
-            second = second,
             blur = shortEdge * 0.004f,
-            stroke = shortEdge * 0.016f,
+            stroke = shortEdge * 0.019f,
             alpha = 1.0f,
         )
     }
 }
 
 @Composable
-private fun CurrentPass(head: Float, second: Float, blur: Dp, stroke: Dp, alpha: Float) {
+private fun CurrentPass(head: Float, blur: Dp, stroke: Dp, alpha: Float) {
     Canvas(
         Modifier
             .fillMaxSize()
             .blur(blur)
             .alpha(alpha)
     ) {
-        drawCurrent(head, second, stroke.toPx())
+        drawCurrent(head, stroke.toPx())
     }
 }
 
-private fun DrawScope.drawCurrent(head: Float, second: Float, strokeWidth: Float) {
+private fun DrawScope.drawCurrent(head: Float, strokeWidth: Float) {
     val inset = strokeWidth / 2f
     val brush = Brush.sweepGradient(
         colorStops = Array(CURRENT_SAMPLES + 1) { i ->
             val t = i.toFloat() / CURRENT_SAMPLES
-            // Whichever head is nearer owns this point, so the two never sum into a washed-out
-            // band where they overlap -- they pass through each other and separate again.
-            val energy = maxOf(comet(t - head), comet(t - second) * 0.75f)
-            t to currentColor(energy)
+            t to currentColor(comet(t - head))
         },
         center = center,
     )
@@ -169,8 +164,18 @@ private fun currentColor(energy: Float): Color {
 }
 
 private const val CURRENT_SAMPLES = 96
-private const val HEAD_SPAN = 0.055f
-private const val TAIL_SPAN = 0.290f
+
+/**
+ * Head and tail as fractions of the perimeter (change 19.3).
+ *
+ * Both grew when the second head went away: the head is wider so it carries real weight as it
+ * passes a corner, and the tail is long enough to keep the border alive behind it without the
+ * second light. Together they cover a little over half the perimeter, which leaves a clear dark
+ * stretch ahead of the head — that gap is what the eye reads the direction from, so it must not be
+ * closed by making the tail longer still.
+ */
+private const val HEAD_SPAN = 0.080f
+private const val TAIL_SPAN = 0.420f
 private const val WAIT_CORNER_DP = 26
 
 private const val BASE_R = 0.043f

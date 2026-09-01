@@ -72,6 +72,16 @@ class BleController(private val context: Context) {
 
     private var gatt: BluetoothGatt? = null
     private var target: DiscoveredDevice? = null
+
+    /**
+     * True while the link is down because *we* took it down (change 19.2).
+     *
+     * Everything else that drops the link is treated as recoverable and reconnected. Without this
+     * flag a user-requested disconnect and a board reset look identical from
+     * `onConnectionStateChange`, and reconnecting after the former would make the DISCONNECT button
+     * do nothing.
+     */
+    private var userDisconnected = false
     private var profile: ResolvedProfile? = null
     private var scanning = false
     private var retries = 0
@@ -145,12 +155,14 @@ class BleController(private val context: Context) {
             _connectionState.value = BleConnectionState.Failed("Unknown device ${device.address}")
             return
         }
+        userDisconnected = false
         _connectionState.value = BleConnectionState.Connecting(device)
         queue.clear()
         gatt = remote.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
     }
 
     fun disconnect() {
+        userDisconnected = true
         queue.clear()
         gatt?.let { runCatching { it.disconnect() } }
         closeGatt()
@@ -189,16 +201,39 @@ class BleController(private val context: Context) {
                 newState == BluetoothProfile.STATE_DISCONNECTED -> {
                     queue.clear()
                     closeGatt()
-                    if (status == STATUS_133 && retries < MAX_RETRIES) {
-                        // Generic, usually transient. Retry with backoff before giving up.
-                        retries++
-                        mainHandler.postDelayed({ openGatt(device) }, RETRY_DELAY_MS * retries)
-                        _connectionState.value = BleConnectionState.Connecting(device)
-                    } else if (status != BluetoothGatt.GATT_SUCCESS) {
-                        _connectionState.value =
-                            BleConnectionState.Failed("Disconnected unexpectedly", status)
-                    } else {
-                        _connectionState.value = BleConnectionState.Disconnected
+                    profile = null
+                    when {
+                        // We asked for this. Stay down.
+                        userDisconnected -> {
+                            _connectionState.value = BleConnectionState.Disconnected
+                        }
+
+                        /*
+                         * Change 19.2: anything else is a link we still want, so reconnect.
+                         *
+                         * Pressing RESET on the board drops the peripheral, and that arrives here
+                         * as a peer-terminated or timeout status -- not the 133 the old code was
+                         * the only case for. So a reset ended the session: the app fell to
+                         * "Disconnected unexpectedly" and sat there until somebody re-scanned and
+                         * re-tapped the device. Resetting the board is a completely normal thing to
+                         * do mid-demo, and the operator should be able to press it, watch the app
+                         * come back on its own, and then select a recipe with the board button.
+                         *
+                         * Retries are capped and backed off so a board that is genuinely off does
+                         * not leave the radio scanning forever, but the cap is generous: a reset
+                         * takes a moment to come back up and advertise again.
+                         */
+                        retries < MAX_RETRIES -> {
+                            retries++
+                            mainHandler.postDelayed({ openGatt(device) }, RETRY_DELAY_MS * retries)
+                            _connectionState.value = BleConnectionState.Connecting(device)
+                        }
+
+                        status != BluetoothGatt.GATT_SUCCESS ->
+                            _connectionState.value =
+                                BleConnectionState.Failed("Disconnected unexpectedly", status)
+
+                        else -> _connectionState.value = BleConnectionState.Disconnected
                     }
                 }
             }
@@ -346,7 +381,15 @@ class BleController(private val context: Context) {
     private companion object {
         const val TAG = "BleController"
         const val STATUS_133 = 133
-        const val MAX_RETRIES = 3
+        /**
+         * Reconnect attempts after an unexpected drop (change 19.2).
+         *
+         * Raised from 3: it now covers a board reset, not just a transient 133, and a Nucleo takes
+         * a second or two to boot and start advertising again. With the linear backoff below the
+         * eight attempts span roughly 22 s, which comfortably outlasts a reset without leaving the
+         * radio retrying a board that has actually been switched off.
+         */
+        const val MAX_RETRIES = 8
         const val RETRY_DELAY_MS = 600L
         const val DESIRED_MTU = 185
     }
