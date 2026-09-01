@@ -3,6 +3,7 @@
 #include "led_fx.h"
 #include "seq_leds.h"
 #include "solid_seq.h"
+#include "module.h"
 #include "ble.h"
 #include "config.h"
 #include <stdio.h>
@@ -636,6 +637,30 @@ static void exec(char *line)
         cmd_speed(argv, argc, true);
     } else if (strcmp(cmd, "seq") == 0) {
         cmd_seq(argv, argc);
+    } else if (strcmp(cmd, "mods") == 0) {
+        /* What colour is every solid module, right now.
+         *
+         * The wire carries RUN and DONE but has no message for a module going
+         * DARK, so an acknowledgement window -- blue, then dark -- is invisible
+         * to anything downstream. Polling this over the console is the only way
+         * to MEASURE a colour requirement rather than assert one, which is what
+         * change 21 (a dump must hold blue for ten seconds) actually asks for.
+         *
+         * One line, fixed width, so it can be sampled in a loop and diffed. */
+        char mb[72];
+        uint8_t n = 0u;
+        for (uint8_t sl = 0u; sl < 6u; sl++) {
+            char c = (module_get_state(sl) == MOD_RUNNING) ? 'B'
+                   : (module_get_state(sl) == MOD_READY)   ? 'G'
+                                                           : '.';
+            mb[n++] = c;
+        }
+        mb[n] = 0;
+        {
+            char ob[64];
+            snprintf(ob, sizeof(ob), "mods %s\r\n", mb);
+            out(ob);
+        }
     } else if (strcmp(cmd, "recipe") == 0) {
         /* Bench stand-in for the board's select button (change 16.7): announce
          * the sequence without starting it, so the app's recipe card and START
