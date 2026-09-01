@@ -626,6 +626,13 @@ static void exec(char *line)
         cmd_speed(argv, argc, true);
     } else if (strcmp(cmd, "seq") == 0) {
         cmd_seq(argv, argc);
+    } else if (strcmp(cmd, "recipe") == 0) {
+        /* Bench stand-in for the board's select button (change 16.7): announce
+         * the sequence without starting it, so the app's recipe card and START
+         * button can be exercised without reaching for the rig. Same one call
+         * the button makes -- deliberately not a second code path. */
+        ble_recipe(SS1_SEQ_NUMBER);
+        out("RECIPE sent — the app should show the recipe and offer START\r\n");
     } else if (strcmp(cmd, "ble") == 0) {
         /* Did anything the app sent actually get here? See ble.h. */
         char bb[96];

@@ -225,6 +225,14 @@ fun MainScreen(viewModel: RobotViewModel) {
         // Change 16.1: the gate. Drawn above the intro because it succeeds it -- the recipe card
         // fades, this arrives, and nothing on the rig has lit up yet. It is the only control on
         // screen at that moment, so it sits dead centre rather than in a corner with the HUD.
+        // Change 16.7: while the board is selected, dark, and waiting on a person, the whole
+        // border glows green and keeps moving. It is a state, not an announcement -- it holds for
+        // as long as the operator takes and stops the instant START is pressed, which is why it is
+        // tied to READY alone and not to STARTING.
+        if (startGate == StartGate.READY) {
+            WaitingEdgeGlow(modifier = Modifier.fillMaxSize())
+        }
+
         val startState = when (startGate) {
             StartGate.READY -> StartButtonState.OFFERED
             StartGate.STARTING -> StartButtonState.WAITING

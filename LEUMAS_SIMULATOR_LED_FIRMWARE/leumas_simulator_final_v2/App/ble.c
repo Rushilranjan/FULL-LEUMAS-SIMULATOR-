@@ -65,6 +65,13 @@ void ble_move(uint8_t from1based, uint8_t to1based)
 
 void ble_lot_done(void)                   { ble_send("LOT:DONE\r\n"); }
 
+void ble_recipe(uint8_t seq)
+{
+    char b[16];
+    snprintf(b, sizeof(b), "RECIPE:%u\r\n", (unsigned)seq);
+    ble_send(b);
+}
+
 /* ---- inbound ------------------------------------------------------------
  * One line at a time, terminated by CR or LF. A BT05 splits a write across
  * notifications and the app terminates with CRLF, so an empty line is normal

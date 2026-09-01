@@ -83,6 +83,14 @@ object PlantStateReducer {
             stageIndex = -1,
         )
 
+        /*
+         * Change 16.7: a selection, not a state change. The board has chosen a sequence and is
+         * sitting dark waiting for START -- nothing is running, nothing is lit, and the plant model
+         * must not pretend otherwise. It is the ViewModel that reacts to this, by showing the
+         * recipe and offering the button. The plant only learns anything when SEQ arrives.
+         */
+        is McuEvent.RecipeSelected -> state
+
         is McuEvent.Unknown -> state
     }
 

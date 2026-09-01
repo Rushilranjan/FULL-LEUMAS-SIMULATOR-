@@ -20,6 +20,9 @@ object McuProtocolParser {
         // Checked before the SEQ/RUN/DONE prefixes so it can never be mistaken for one of them.
         line == "LOT:DONE" -> McuEvent.LotDone
 
+        // Before PREFIX_SEQ only for symmetry with LOT:DONE above; the prefixes cannot collide.
+        line.startsWith(PREFIX_RECIPE) -> parseRecipe(line)
+
         line.startsWith(PREFIX_SEQ) -> parseSequence(line)
         line.startsWith(PREFIX_RUN) -> parseSlot(line, PREFIX_RUN, McuEvent::ModuleRun)
         line.startsWith(PREFIX_DONE) -> parseSlot(line, PREFIX_DONE, McuEvent::ModuleDone)
@@ -34,6 +37,14 @@ object McuProtocolParser {
         // Not range-checked against {1,2,4,5}: a future firmware may add sequences, and showing
         // an unexpected sequence number is more honest than discarding it.
         return McuEvent.SequenceStarted(n)
+    }
+
+    private fun parseRecipe(line: String): McuEvent {
+        val n = line.removePrefix(PREFIX_RECIPE).toIntOrNull()
+            ?: return McuEvent.Unknown(line, "RECIPE payload is not a number")
+        // Same reasoning as SEQ: not range-checked, because a future firmware may add sequences
+        // and an unexpected number is more honest than a discarded message.
+        return McuEvent.RecipeSelected(n)
     }
 
     private fun parseSlot(
@@ -65,6 +76,7 @@ object McuProtocolParser {
         return McuEvent.Move(from, to, SlotMap.transferKind(to))
     }
 
+    private const val PREFIX_RECIPE = "RECIPE:"
     private const val PREFIX_SEQ = "SEQ:"
     private const val PREFIX_RUN = "RUN:"
     private const val PREFIX_DONE = "DONE:"

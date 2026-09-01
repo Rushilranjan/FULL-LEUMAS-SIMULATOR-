@@ -57,6 +57,19 @@ sealed interface McuEvent {
      */
     data object LotDone : McuEvent
 
+    /**
+     * A sequence has been **selected** on the board, and is waiting to be started (change 16.7).
+     *
+     * Emitted when the operator presses the board's user button. Nothing has started and nothing
+     * on the rig is lit: this is the cue for the app to show the recipe and offer its START
+     * button, and the run does not begin until the operator presses it.
+     *
+     * The distinction from [SequenceStarted] is the whole point, and it is not cosmetic. `RECIPE`
+     * means chosen and waiting; `SEQ` means running. Before 16.7 the board button did both at
+     * once, so the recipe card played over a demo that had already lit up.
+     */
+    data class RecipeSelected(val sequence: Int) : McuEvent
+
     /** Unparseable or out-of-range input. Logged for the debug screen, otherwise ignored. */
     data class Unknown(val raw: String, val reason: String) : McuEvent
 }

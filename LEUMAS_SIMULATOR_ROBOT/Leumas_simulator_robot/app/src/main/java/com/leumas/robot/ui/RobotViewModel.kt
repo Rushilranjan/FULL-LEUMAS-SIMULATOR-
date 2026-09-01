@@ -172,12 +172,11 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
                     assembler.reset()
                     disarmStart()
                 }
-                // Change 16.1: a live link is the cue to show the recipe and offer START. The
-                // board is sitting dark waiting to be asked, so this is the opening beat of the
-                // whole demo.
-                if (state is BleConnectionState.Connected) {
-                    armStart()
-                }
+                // Change 16.7: connecting is NOT the cue to arm. The operator selects a
+                // sequence on the board first, and RECIPE:<n> is what opens the gate -- see
+                // [apply]. Arming here as well would put a START button on screen for a board
+                // that had not been asked for anything yet, and pressing it would start a run
+                // the operator never selected.
             }
         }
     }
@@ -215,6 +214,13 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
             }
             _startGate.value = StartGate.RUNNING
         }
+        // Change 16.7: the board button selected a sequence. Nothing is running and nothing is
+        // lit -- show its recipe and offer START. Re-selecting simply replays the intro.
+        if (event is McuEvent.RecipeSelected) {
+            pendingDemo = null
+            armStart(event.sequence)
+        }
+
         if (event is McuEvent.LotDone) lotDoneAtMs = now
         if (event is McuEvent.Move && event.kind == TransferKind.ROBOT) {
             machine.submit(event, now)
@@ -339,12 +345,16 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
      *
      * The intro plays over a board that is doing nothing at all, which is the point: the operator
      * reads the recipe, then decides when the rig lights up.
+     *
+     * Change 16.7 dropped the early return on RUNNING. The board button is a *selection* now, and
+     * pressing it during a run is how the operator restarts the demo -- so it has to re-arm rather
+     * than be ignored. The run underneath is left alone until START actually arrives; the firmware
+     * restarts cleanly on its own when it does.
      */
-    private fun armStart() {
-        if (_startGate.value == StartGate.RUNNING) return
+    private fun armStart(sequence: Int = ARMED_SEQUENCE) {
         armJob?.cancel()
         _startGate.value = StartGate.ARMING
-        startSequenceIntro(ARMED_SEQUENCE)
+        startSequenceIntro(sequence)
         armJob = viewModelScope.launch {
             delay(SEQUENCE_INTRO_MS)
             if (_startGate.value == StartGate.ARMING) _startGate.value = StartGate.READY
@@ -462,11 +472,10 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
         val START_COMMAND: ByteArray = "START\r\n".toByteArray()
 
         /**
-         * Which recipe to show while arming.
+         * Fallback recipe when nothing has named one.
          *
-         * The board has not told us anything yet -- it is dark, waiting to be asked -- and there
-         * is only one sequence in the firmware. When a second arrives this becomes a selection
-         * rather than a constant.
+         * Since change 16.7 the board sends `RECIPE:<n>` and that number is used instead, so this
+         * only covers demo mode, where there is no board to ask.
          */
         const val ARMED_SEQUENCE = 1
 

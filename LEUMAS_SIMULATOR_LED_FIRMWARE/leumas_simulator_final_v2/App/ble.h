@@ -10,6 +10,7 @@
  *   DONE:<slot>      module <slot> finished
  *   MOVE:<a>><b>     transfer material from slot <a> to slot <b>
  *   LOT:DONE         one lot completed
+ *   RECIPE:<n>       sequence <n> selected -- NOT started (change 16.7)
  *
  * Slot numbers on the wire are 1-based (match the requirements).
  *
@@ -40,6 +41,13 @@ void ble_run(uint8_t slot1based);
 void ble_done(uint8_t slot1based);
 void ble_move(uint8_t from1based, uint8_t to1based);
 void ble_lot_done(void);
+
+/* Change 16.7: the board button selects a sequence and announces it. Nothing
+ * lights up and no cycle begins -- this exists purely so the app can show the
+ * recipe and offer START. The run itself is announced later, by SEQ, when the
+ * operator actually presses it. Keeping the two separate is the whole point:
+ * SEQ means "running", RECIPE means "chosen, waiting for you". */
+void ble_recipe(uint8_t seq);
 
 /* Drain whatever the app has sent. Call every main-loop pass; never blocks. */
 void ble_poll(void);

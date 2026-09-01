@@ -28,19 +28,33 @@ void app_tick(void)
     led_cmd_poll();
     ble_poll();
 
-    /* Change 16.1: NOTHING lights up on its own. The rig sits dark from power-on
-     * until somebody asks for a run, and there are exactly two ways to ask:
-     * START over BLE, which is the app's start button once it has shown the
-     * recipe, and the board button for bench work without a phone. `seq 1` on
-     * the console is the third, and goes through led_cmd_poll() above.
+    /* Change 16.1/16.7: NOTHING lights up on its own, and the board button does
+     * not start anything either -- it SELECTS.
      *
-     * The BLE path is the one that matters for coordination, not just for
-     * gating: when the app starts the run it knows t=0 exactly, so its arm
-     * animation and the board's colour changes begin from the same instant
-     * rather than the app having to infer the start from the first cue.
+     * The demo opens in two beats, and they are deliberately different events:
      *
-     * Either source restarts cleanly mid-demo. */
-    if (button_poll() || ble_take_start()) {
+     *   button press  ->  RECIPE:1 goes out, and nothing else happens at all.
+     *                     The rig stays dark. The app shows the recipe and
+     *                     offers its START button.
+     *   START arrives ->  the run actually begins, and SEQ:1 announces it.
+     *
+     * 16.1 had the button starting the run outright, which lit the feeders the
+     * instant it was pressed and left the operator watching a demo that had
+     * already begun while the recipe card was still playing. Selecting and
+     * starting are now separate, so the recipe is read over a dark board and
+     * the run begins when -- and only when -- the operator says so.
+     *
+     * `seq 1` on the console still starts directly, through led_cmd_poll()
+     * above: it is the bench path for working without a phone, and there is no
+     * app there to press anything.
+     *
+     * Starting from the app also pins t=0 on both sides, so its arm animation
+     * and the board's colour changes begin from the same instant instead of
+     * the app inferring the start from whichever cue it caught first. */
+    if (button_poll()) {
+        ble_recipe(SS1_SEQ_NUMBER);
+    }
+    if (ble_take_start()) {
         solid_seq1_start();
     }
 

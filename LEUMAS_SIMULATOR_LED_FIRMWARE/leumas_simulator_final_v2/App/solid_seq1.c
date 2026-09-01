@@ -5,9 +5,6 @@
 #include "ble.h"
 #include "timebase.h"
 
-/* The number this sequence answers to on the console and on the BLE wire. */
-#define SS1_SEQ_NUMBER   1u
-
 /* 0-based slot index -> the 1-based number the operator and the robot use. */
 #define SLOT1(idx)       ((uint8_t)((idx) + 1u))
 

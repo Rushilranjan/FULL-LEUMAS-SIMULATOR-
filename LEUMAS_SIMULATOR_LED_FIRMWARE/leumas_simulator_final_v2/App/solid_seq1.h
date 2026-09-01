@@ -59,6 +59,11 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+/* The number this sequence answers to on the console and on the BLE wire. In
+ * the header because the button announces it (RECIPE:<n>) before anything
+ * starts, so app.c needs it too. */
+#define SS1_SEQ_NUMBER   1u
+
 typedef enum {
     SS1_IDLE = 0,    /* never started, or stopped                             */
     SS1_RUNNING,     /* a cycle is in progress                                */
