@@ -130,6 +130,18 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
     val panelsDimmed: StateFlow<Boolean> = _panelsDimmed.asStateFlow()
 
     /**
+     * Bumped whenever the operator takes hold of the board -- a RESET (which announces READY on
+     * boot) or a press of the user button (which announces RECIPE). The screen closes the side
+     * panels on it (change 25.1).
+     *
+     * A counter rather than a flag. The panels must close *again* on the next press even though
+     * they are already closed, and the operator may well have reopened them in between; a boolean
+     * would need a handshake back from the UI to re-arm, for nothing gained.
+     */
+    private val _panelsClosed = MutableStateFlow(0L)
+    val panelsClosed: StateFlow<Long> = _panelsClosed.asStateFlow()
+
+    /**
      * The sequence-start announcement (change 13.6), or null when none is playing.
      *
      * Set the moment `SEQ:<n>` arrives and cleared after [SEQUENCE_INTRO_MS]. It is a pure overlay:
@@ -194,6 +206,13 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun apply(event: McuEvent, now: Long) {
+        // Change 25.1: the board is in the operator's hands -- it has either just rebooted or the
+        // user button has chosen a recipe. Either way a run is about to be watched, so the controls
+        // get out of the way instead of sitting over the arena.
+        if (event is McuEvent.Ready || event is McuEvent.RecipeSelected) {
+            _panelsClosed.value += 1L
+        }
+
         if (event is McuEvent.SequenceStarted) {
             // Hard reset: abandon any in-flight animation before the state is wiped. The poser is
             // told to drop the transfer but keeps its carriage position, so the arm glides home

@@ -45,6 +45,26 @@ data class Payload(
 }
 
 /**
+ * The station the arm is working at, or driving on to (change 25.3).
+ *
+ * The renderer needs a **fixed** anchor to hang the module's pipework off, and the live pose cannot
+ * give it one -- the arm is moving. This carries the station's own carriage position, facing and
+ * reach target, all of which hold still for as long as the arm is there, so a fixture drawn from
+ * them stays put while the machine drives onto it.
+ *
+ * They are also the exact numbers the poser steers the arm toward, and that is what makes the tool
+ * end up *in* the pipe rather than near it: dock and target are the same point by construction
+ * rather than by tuning.
+ */
+data class Dock3D(
+    val carriageX: Float,
+    val yaw: Float,
+    val reach: Vec2,
+    /** Faded 0..1, so the fixture never pops in or blinks out from under the tool. */
+    val presence: Float,
+)
+
+/**
  * A resolution-independent snapshot of the arm for the 3-D renderer.
  *
  * [arm] is solved in the reach plane (see [Arena3D]); the renderer lifts those planar joints into
@@ -60,6 +80,7 @@ data class Robot3DPose(
     val wristRoll: Float,
     val motion: Float,
     val payload: Payload = Payload.EMPTY,
+    val dock: Dock3D? = null,
 ) {
     companion object {
         /** Idle: parked at rail centre, facing the camera, arm stowed, gripper open. */
@@ -210,6 +231,20 @@ class Robot3DPoser {
         val srcApproach = Arena3D.approachPoint(srcReach)
         val dstApproach = Arena3D.approachPoint(dstReach)
 
+        // Change 25.3: the module's pipework belongs to the STATION, not to the arm, so it is
+        // anchored to the station's own carriage, facing and target rather than to the live pose.
+        // Faded in across the positioning move and out across the retract, so the fitting is
+        // already standing there when the tool arrives.
+        val dock = when (phase) {
+            RobotPhase.POSITIONING_AT_SOURCE -> Dock3D(srcX, srcYaw, srcReach, motion)
+            RobotPhase.PICKING -> Dock3D(srcX, srcYaw, srcReach, 1f)
+            RobotPhase.LIFTING -> Dock3D(srcX, srcYaw, srcReach, 1f - motion)
+            RobotPhase.POSITIONING_AT_DESTINATION -> Dock3D(dstX, dstYaw, dstReach, motion)
+            RobotPhase.PLACING -> Dock3D(dstX, dstYaw, dstReach, 1f)
+            RobotPhase.RETRACTING -> Dock3D(dstX, dstYaw, dstReach, 1f - motion)
+            else -> null
+        }
+
         val rawTarget = when (phase) {
             RobotPhase.MOVING_TO_SOURCE -> Arena3D.STOW
             // Travel to the approach point during POSITIONING, so the arm is already standing off
@@ -254,6 +289,7 @@ class Robot3DPoser {
             wristRoll = wristRoll,
             carrying = state.carryingPayload,
             payload = payloadFor(phase, state.phaseProgress, transfer),
+            dock = dock,
             previousX = previousX,
         )
     }
@@ -349,6 +385,7 @@ class Robot3DPoser {
         carrying: Boolean,
         payload: Payload,
         previousX: Float,
+        dock: Dock3D? = null,
     ): Robot3DPose {
         lastCarriageX = carriageX
         val raw = (abs(carriageX - previousX) / 0.04f).coerceIn(0f, 1f)
@@ -368,6 +405,7 @@ class Robot3DPoser {
             wristRoll = wristRoll,
             motion = smoothedMotion,
             payload = payload,
+            dock = dock,
         )
     }
 
@@ -406,26 +444,54 @@ class Robot3DPoser {
     }
 
     /**
-     * Drive in to a module: one continuous move along the reach axis, from the approach point to
-     * the target.
+     * Drive in to a module: one continuous, gently bowed move from the approach point onto the
+     * target.
      *
-     * The straight final segment is the point — it runs along the reach axis, which is how an
-     * industrial machine enters a station.
+     * **Change 25.4 made this an arc, and gave it more of the phase.** It used to be a straight
+     * lerp along the reach axis, justified as how an industrial machine enters a station. That is
+     * true of the *axis* and says nothing about the *path*: driving straight in with the tool
+     * already at working height is a stab, and it is what "make the descent more graceful" is
+     * about. Bowing the segment slightly above its own chord lifts the tool a little off the
+     * approach point, carries it over the station and sets it down -- the curve's final tangent
+     * points at the target from above, so the last thing the arm does is lower itself onto it.
+     *
+     * [REACH_RAMP] also grew, so the same move now takes about a third longer.
      *
      * **Change 19.1 removed the hold at the approach point.** 15.2 asked for a pause at each
      * coordinate and got a literal one: a third of the drive-in window was spent standing still,
-     * and with the same distance then crammed into the remaining two thirds the move also had to
-     * be faster. It read as stutter-then-lunge rather than as a machine. Real controllers do not
-     * stop at a via point either — they blend through it — so the arm now uses the whole window
-     * for one smooth accelerate-and-settle. The move is *slower* than before as well as
-     * continuous, because it has half again as much time to cover the same distance.
+     * and with the same distance crammed into the rest the move also had to be faster. It read as
+     * stutter-then-lunge. Real controllers blend through a via point rather than stopping at it.
      *
-     * Progress is scaled by [REACH_RAMP] and clamped, so the arm is fully in position well before
-     * the material starts to flow at [FLOW_START] and simply stays there for the rest of the phase.
+     * Progress is scaled by [REACH_RAMP] and clamped, so the arm is fully settled well before the
+     * material starts to flow at [FLOW_START] and simply holds for the rest of the phase.
      */
-    private fun approachPath(approach: Vec2, target: Vec2, progress: Float): Vec2 {
-        val t = (progress / REACH_RAMP).coerceIn(0f, 1f)
-        return lerp(approach, target, sCurve(t))
+    private fun approachPath(approach: Vec2, target: Vec2, progress: Float): Vec2 =
+        reachArc(approach, target, sCurve((progress / REACH_RAMP).coerceIn(0f, 1f)))
+
+    /**
+     * The drive-in curve, parameterised 0 at [approach] and 1 at [target].
+     *
+     * Shared with [retractPath] so the arm leaves a station along exactly the path it arrived on,
+     * which is both what a real controller does and one less shape to tune. Reach-plane y grows
+     * downward, so subtracting the lift bows the curve *upward* in the world.
+     *
+     * The bow is a fraction of the segment's own length and capped, so a short reach stays nearly
+     * straight instead of swinging.
+     */
+    private fun reachArc(approach: Vec2, target: Vec2, t: Float): Vec2 {
+        val span = kotlin.math.hypot(target.x - approach.x, target.y - approach.y)
+        if (span < 1e-4f) return target
+        val lift = kotlin.math.min(REACH_ARC, span * REACH_ARC_RATIO)
+        val control = Vec2(
+            x = (approach.x + target.x) / 2f,
+            y = (approach.y + target.y) / 2f - lift,
+        )
+        val u = t.coerceIn(0f, 1f)
+        val inv = 1f - u
+        return Vec2(
+            x = inv * inv * approach.x + 2f * inv * u * control.x + u * u * target.x,
+            y = inv * inv * approach.y + 2f * inv * u * control.y + u * u * target.y,
+        )
     }
 
     /**
@@ -446,7 +512,8 @@ class Robot3DPoser {
     private fun retractPath(target: Vec2, approach: Vec2, transit: Vec2, progress: Float): Vec2 {
         val t = sCurve(progress.coerceIn(0f, 1f))
         return if (t < RETRACT_OUT) {
-            lerp(target, approach, t / RETRACT_OUT)
+            // Change 25.4: back out along the same bowed curve the arm drove in on, reversed.
+            reachArc(approach, target, 1f - t / RETRACT_OUT)
         } else {
             arc(approach, transit, (t - RETRACT_OUT) / (1f - RETRACT_OUT))
         }
@@ -494,8 +561,22 @@ class Robot3DPoser {
         /** Ignore absurd frame gaps (app resumed, debugger paused) rather than jumping. */
         const val MAX_DT_MS = 100L
 
-        /** Fraction of a collect/dispense phase spent driving the arm in before the flow starts. */
-        const val REACH_RAMP = 0.38f
+        /**
+         * Fraction of a collect/dispense phase spent driving the arm in before the flow starts.
+         *
+         * Change 25.4 raised this from 0.38. The drive-in is the move that was called ungraceful,
+         * and the cheapest thing to give it is time: at 0.185 of a 40 s cycle the phase is 7.4 s,
+         * so the descent goes from about 2.8 s to 3.8 s over a slightly longer (now bowed) path --
+         * roughly a quarter slower. The flow window pays for it, which is why [FLOW_END] moves out
+         * to 0.98 to give some of that back.
+         */
+        const val REACH_RAMP = 0.52f
+
+        /** How far the drive-in is bowed above its own chord, in reach-plane units (change 25.4). */
+        const val REACH_ARC = 0.075f
+
+        /** Cap on that bow, as a fraction of the segment's length, so short reaches stay straight. */
+        const val REACH_ARC_RATIO = 0.30f
 
         /**
          * Where the retract stops going straight out and starts arcing away, as a fraction of the
@@ -508,9 +589,15 @@ class Robot3DPoser {
          */
         const val RETRACT_OUT = 0.34f
 
-        /** Window inside PICKING/PLACING during which material actually flows. */
-        const val FLOW_START = 0.42f
-        const val FLOW_END = 0.95f
+        /**
+         * Window inside PICKING/PLACING during which material actually flows.
+         *
+         * FLOW_START must stay *after* [REACH_RAMP] or the stream starts before the tool has
+         * arrived -- and with change 25.3 that would mean pouring before the nozzle is inside the
+         * station's funnel. Both moved together in change 25.4, keeping the same margin.
+         */
+        const val FLOW_START = 0.56f
+        const val FLOW_END = 0.98f
 
         /** Degrees of dispenser rotor rotation per second at full flow (change 15.1). */
         const val PUMP_DEG_PER_SEC = 260f

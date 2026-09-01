@@ -58,8 +58,15 @@ fun MainScreen(viewModel: RobotViewModel) {
     val sequenceIntro by viewModel.sequenceIntro.collectAsState()
     val startGate by viewModel.startGate.collectAsState()
     val panelsDimmed by viewModel.panelsDimmed.collectAsState()
+    val panelsClosed by viewModel.panelsClosed.collectAsState()
 
     var panelsOpen by rememberSaveable { mutableStateOf(true) }
+
+    // Change 25.1: RESET, or the board's user button, closes the panels. Keyed on a counter so a
+    // second press closes them again after the operator has reopened them -- see the ViewModel.
+    LaunchedEffect(panelsClosed) {
+        if (panelsClosed > 0L) panelsOpen = false
+    }
 
     // Change 13.4: the controls fade with the same envelope as the task card while the arm is
     // working behind them, so nothing on the HUD ever competes with the animation. Driven by the

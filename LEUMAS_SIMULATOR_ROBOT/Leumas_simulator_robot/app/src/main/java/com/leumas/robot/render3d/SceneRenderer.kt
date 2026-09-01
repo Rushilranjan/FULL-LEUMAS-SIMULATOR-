@@ -523,11 +523,280 @@ class SceneRenderer(
             drawPeristalticHead(hopperTip, out, side, axis, payload)
         }
 
-        if (payload.stream > 0.01f) {
-            // Collection falls in through the open top; discharge leaves from the dispenser outlet.
+        // -- material transfer -----------------------------------------------------------------------
+
+        val dock = pose.dock
+        if (!solid && dock != null && dock.presence > 0.01f) {
+            // Change 25.3: the liquid line works into real pipework at the module.
+            drawStationPipe(dock, payload, top, timeS)
+        } else if (payload.stream > 0.01f) {
+            // Powder keeps the free-flying granule cone. An auger discharging into a chute is a
+            // different machine, and the cone was never what was reported. This is also the
+            // fallback if a liquid transfer somehow runs without a dock.
             val origin = if (payload.pouring) nozzle else top
             drawStream(payload, origin, axis, side, timeS)
         }
+    }
+
+    /**
+     * Where the peristaltic head's nozzle sits, for a given gripper position and facing.
+     *
+     * Lifted out of [drawPeristalticHead] so [drawStationPipe] can place the funnel on the *docked*
+     * nozzle without re-deriving the offset chain by eye (change 25.3). Both go through the same
+     * constants, so the fitting lands on the dispenser exactly rather than nearly.
+     */
+    private fun liquidNozzle(gripper: FloatArray, out: FloatArray): FloatArray {
+        val tubeR = PUMP_ORBIT + PUMP_ROLLER_R * 0.9f
+        val theta = (PUMP_TUBE_FROM + PUMP_TUBE_ARC) * Math.PI.toFloat()
+        val drop = VESSEL_DROP + VESSEL_HEIGHT + HOPPER_HEIGHT +
+            PUMP_RADIUS * 0.85f - sin(theta) * tubeR + PUMP_NOZZLE
+        return add(
+            floatArrayOf(gripper[0], gripper[1] - drop, gripper[2]),
+            scale(out, cos(theta) * tubeR),
+        )
+    }
+
+    /**
+     * The module's pipework, and the liquid moving through it (change 25.3).
+     *
+     * The liquid line used to transfer material to and from **nothing**: a stream left the nozzle
+     * on a fixed arc and stopped in mid-air near the frame edge, because the module it feeds is
+     * off-screen. This puts a real fitting at the station -- a glass riser with a funnel or a spout
+     * on the end -- so the transfer has both ends and there is something for the tool to work into.
+     *
+     * It hangs off [Dock3D] rather than off the arm, so it stands still while the machine drives
+     * onto it. And because the dock carries the same carriage, facing and target the poser steers
+     * to, the docked nozzle computed here **is** the live nozzle once the arm is in position: the
+     * funnel swallows the dispenser exactly. That is the "full contact" the pour needs in order to
+     * read as pumping rather than as spilling near a pipe.
+     *
+     * Dispensing, the fitting is an inlet funnel just below the nozzle and the liquid runs away
+     * down the riser. Collecting, it is a discharge spout standing above the vessel mouth and the
+     * liquid falls out of it into the open top -- which also retires the old collect animation,
+     * where the same arc was played upside down and liquid appeared to squirt *upward* out of the
+     * vessel.
+     */
+    private fun drawStationPipe(
+        dock: Dock3D,
+        payload: Payload,
+        vesselMouth: FloatArray,
+        timeS: Float,
+    ) {
+        val axis = UP
+        val down = floatArrayOf(0f, -1f, 0f)
+        val dockSide = sideAxis(dock.yaw)
+        val dockOut = normalize(cross(axis, dockSide))
+        val dockedGripper = worldOf(dock.reach.x, dock.reach.y, dock.carriageX, dock.yaw)
+
+        val pouring = payload.pouring
+        // Where the fitting meets the machine.
+        val mouth = if (pouring) {
+            liquidNozzle(dockedGripper, dockOut)
+        } else {
+            add(add(dockedGripper, scale(down, VESSEL_DROP)), scale(axis, PIPE_SPOUT_GAP))
+        }
+        // Which way the riser leaves: down and out of frame for an inlet, up toward the supply
+        // header for a discharge spout.
+        val run = if (pouring) down else axis
+        val presence = dock.presence.coerceIn(0f, 1f)
+
+        GLES30.glDepthMask(false)
+
+        // The bell: an inlet funnel the nozzle sits down inside, or a spout tapering to its outlet.
+        // Its lip is set slightly *past* the mouth so the tool is enclosed rather than abutting.
+        val lip = add(mouth, scale(run, -PIPE_LIP))
+        val throat = add(mouth, scale(run, PIPE_BELL))
+        frustumBetween(throat, lip, radius = PIPE_BELL_R)
+        program.setModel(
+            model, 0.80f, 0.88f, 0.94f,
+            specular = 0.9f, shininess = 88f, alpha = PIPE_ALPHA * presence, rim = 1.0f,
+        )
+        hopper.draw(program)
+
+        // The riser, running away out of frame.
+        val far = add(throat, scale(run, PIPE_RUN))
+        cylinderBetween3(throat, far, radius = PIPE_RADIUS)
+        program.setModel(
+            model, 0.82f, 0.89f, 0.95f,
+            specular = 0.95f, shininess = 95f, alpha = PIPE_ALPHA * presence, rim = 1.0f,
+        )
+        cyl.draw(program)
+
+        GLES30.glDepthMask(true)
+
+        // Steel collars banding the glass. Same job as the vessel's hoops: without them a clear
+        // tube reads as a smear on the backdrop rather than as a pipe with a diameter.
+        listOf(0.18f, 0.54f, 0.90f).forEach { at ->
+            val y = add(throat, scale(run, PIPE_RUN * at))
+            cylinderBetween3(
+                add(y, scale(run, -0.008f)), add(y, scale(run, 0.008f)),
+                radius = PIPE_RADIUS * 1.16f,
+            )
+            program.setModel(model, 0.46f, 0.49f, 0.54f, specular = 0.85f, shininess = 72f, rim = 0.7f)
+            cyl.draw(program)
+        }
+
+        if (payload.stream <= 0.01f) return
+
+        if (pouring) {
+            // Pumped in at the funnel and running away down the riser, seen through the glass.
+            drawFallingLiquid(mouth, far, payload.stream, PIPE_BREAKUP, timeS)
+        } else {
+            // Down the riser to the spout, then a free fall into the open vessel.
+            drawFallingLiquid(far, mouth, payload.stream, PIPE_BREAKUP, timeS)
+            drawFallingLiquid(mouth, vesselMouth, payload.stream, FALL_BREAKUP, timeS)
+            drawSplash(vesselMouth, payload.stream, timeS)
+        }
+    }
+
+    /**
+     * Falling liquid between two points (change 25.2).
+     *
+     * The old stream was not water, it was a bent hose: a fixed-length arc leaving the tool, a
+     * linear taper, a sideways sine that made it visibly *slither*, and splash droplets drawn at
+     * the source instead of where it landed. Run backwards for a collection it rose out of the open
+     * vessel. That is where "the water animation is weird" comes from, and none of it is fixable by
+     * tuning -- the shape was wrong.
+     *
+     * Two physical facts do nearly all the work here:
+     *
+     *  - **It accelerates.** Drops released at an even rate spread further apart the longer they
+     *    have fallen, and that gradient is the cue that reads as falling rather than as hanging.
+     *  - **It necks down.** Volume is conserved, so the cross-section goes as 1/v and the radius as
+     *    1/sqrt(v). That taper is the most recognisable thing about water leaving a tap, and a
+     *    linear taper has the wrong shape for it.
+     *
+     * Both come from one constant-acceleration model, parameterised by time rather than by
+     * distance so the two stay consistent: travel is `v0*u + (1-v0)*u^2`, normalised to 1 at the
+     * landing, and speed is its derivative.
+     *
+     * The column is drawn coherent for the first [breakup] of the fall and as discrete drops after
+     * it, which is what a real jet does once the velocity gradient beats surface tension.
+     */
+    private fun drawFallingLiquid(
+        from: FloatArray,
+        to: FloatArray,
+        flow: Float,
+        breakup: Float,
+        timeS: Float,
+    ) {
+        val span = sub(to, from)
+        val height = len(span)
+        if (height < 1e-4f || flow <= 0.01f) return
+        val dir = scale(span, 1f / height)
+
+        fun speedAt(u: Float) = EXIT_SPEED + 2f * (1f - EXIT_SPEED) * u.coerceIn(0f, 1f)
+        fun travelAt(u: Float) = (EXIT_SPEED * u + (1f - EXIT_SPEED) * u * u).coerceIn(0f, 1f)
+        fun radiusAt(u: Float) =
+            LIQUID_RADIUS * sqrt(flow) * sqrt(EXIT_SPEED / speedAt(u))
+        fun pointAt(u: Float) = add(from, scale(dir, height * travelAt(u)))
+
+        // **Depth writes stay ON here, unlike every other translucent part of the machine.**
+        //
+        // This is what actually fixed the stream, and it is worth being precise about. The column
+        // is a stack of cylinders and every one of them has two flat end caps. With depth writes
+        // off -- the setting the glass and the vessel contents use, so that overlapping parts of
+        // one body do not punch holes in each other -- all forty-eight of those interior caps blend
+        // straight through the surface in front of them. A cap's normal points along the fall while
+        // the column's sides point outward, so the caps shade differently: measured on device the
+        // column alternated between (64,165,219) and (40,103,141), a regular dark rung every few
+        // pixels the whole way down. That banding is what read as a screw thread, and no amount of
+        // finer segmentation or smoothing removes it -- more segments means more caps.
+        //
+        // A stream is not a hollow shell like the glass; it is a solid body of water, and it must
+        // never blend with itself. Letting it write depth means the near surface wins and every
+        // interior face is discarded, which is both correct and free. It is drawn after the opaque
+        // machine and after the glass, so nothing it occludes is wrong.
+
+        // The coherent column, from the outlet to the breakup point.
+        //
+        // A cylinder cannot taper, so the neck is approximated by a stack of them -- and the stack
+        // has to be FINE. At the first pass this ran on [LIQUID_SEGMENTS], about ten cylinders over
+        // the whole column, and each radius step was a visible shoulder: on device it read as a
+        // stack of tin cans, or at a glance as a corkscrew. At [COLUMN_SEGMENTS] the step between
+        // neighbours is under two percent, which is sub-pixel at any size this is drawn.
+        //
+        // Consecutive segments also overlap slightly. Butted end to end they leave a hairline seam
+        // wherever the radius changes, and a stream with regular rings up it is exactly the "weird"
+        // being fixed here.
+        val segments = maxOf(4, (COLUMN_SEGMENTS * breakup).toInt())
+        for (i in 0 until segments) {
+            val u0 = breakup * i / segments
+            val u1 = breakup * (i + 1) / segments
+            cylinderBetween3(
+                pointAt(u0),
+                add(pointAt(u1), scale(dir, height * COLUMN_OVERLAP)),
+                radius = radiusAt(u0).coerceAtLeast(0.003f),
+            )
+            program.setModel(
+                model, LIQUID[0], LIQUID[1], LIQUID[2],
+                specular = 0.65f, shininess = 58f, alpha = LIQUID_ALPHA,
+            )
+            cyl.draw(program)
+        }
+
+        // The broken tail: drops shed and placed by the same travel law, so they crowd at the
+        // breakup point and stretch apart as they gather speed.
+        //
+        // Two things here are deliberately NOT tidy. The release phase is jittered per drop rather
+        // than evenly spaced -- an even sequence produces a rigid chain, and a chain of identical
+        // beads on a string is what the first pass looked like. And the drop is drawn as a short
+        // cylinder swept along the fall rather than as a [grain]: the granule mesh is an
+        // octahedron, and at this size its facets read as angular diamonds, which is the other half
+        // of why the stream looked like a screw thread. A stubby cylinder has a round silhouette.
+        for (i in 0 until FALL_DROPS) {
+            val seed = (i * 0.6180339f) % 1f
+            val seed2 = (i * 0.2794f) % 1f
+            val jitter = (seed2 - 0.5f) * DROP_JITTER
+            val u = breakup + (1f - breakup) *
+                (((timeS * FALL_RATE + seed + jitter) % 1f + 1f) % 1f)
+            // A drop is a little fatter than the thread it pinched off from, and they vary.
+            val r = radiusAt(u) * (1.10f + 0.55f * seed2)
+            val wander = (seed2 - 0.5f) * FALL_WANDER * (u - breakup)
+            val p = add(pointAt(u), floatArrayOf(wander, 0f, wander * 0.6f))
+            val half = scale(dir, r * 0.55f)
+            cylinderBetween3(sub(p, half), add(p, half), radius = r)
+            program.setModel(
+                model, LIQUID[0], LIQUID[1], LIQUID[2],
+                specular = 0.75f, shininess = 64f, alpha = LIQUID_ALPHA,
+            )
+            cyl.draw(program)
+        }
+    }
+
+    /**
+     * Droplets thrown up where a stream lands (change 25.2).
+     *
+     * Note the argument: **where it lands**. The version this replaces drew its splash at `mouth`,
+     * which during a pour is the dispenser nozzle -- the source. The comment above it said "where
+     * the column lands", so it had been wrong since it was written.
+     */
+    private fun drawSplash(at: FloatArray, flow: Float, timeS: Float) {
+        // Depth writes off here, unlike the column: these fade to nothing as they land, and a
+        // nearly-transparent fragment that writes depth punches a hole in what is behind it.
+        GLES30.glDepthMask(false)
+        for (i in 0 until SPLASH_DROPS) {
+            val seed = (i * 0.6180339f) % 1f
+            val seed2 = (i * 0.2794f) % 1f
+            val hop = (timeS * 1.9f + seed) % 1f
+            val angle = seed * 2f * Math.PI.toFloat()
+            val spray = SPLASH_SPREAD * hop * (0.6f + 0.8f * seed2)
+            // Ballistic: thrown up and falling back, dying as it lands.
+            val lift = SPLASH_LIFT * sin(Math.PI.toFloat() * hop)
+            val p = floatArrayOf(
+                at[0] + cos(angle) * spray,
+                at[1] + lift,
+                at[2] + sin(angle) * spray * 0.6f,
+            )
+            val r = 0.010f * (0.7f + 0.6f * seed2)
+            modelAt(p, r, r, r)
+            program.setModel(
+                model, LIQUID[0], LIQUID[1], LIQUID[2],
+                specular = 0.75f, shininess = 64f, alpha = LIQUID_ALPHA * (1f - hop) * flow,
+            )
+            grain.draw(program)
+        }
+        GLES30.glDepthMask(true)
     }
 
     /**
@@ -636,7 +905,7 @@ class SceneRenderer(
         for (i in 0..PUMP_TUBE_SEGMENTS) {
             val t = i.toFloat() / PUMP_TUBE_SEGMENTS
             // Sweep from straight up, round the front of the race, to pointing down and outward.
-            val theta = (0.5f + 1.15f * t) * Math.PI.toFloat()
+            val theta = (PUMP_TUBE_FROM + PUMP_TUBE_ARC * t) * Math.PI.toFloat()
             val point = add(
                 hub,
                 add(scale(out, cos(theta) * tubeR), scale(axis, sin(theta) * tubeR)),
@@ -742,48 +1011,15 @@ class SceneRenderer(
                 grain.draw(program)
             }
         } else {
-            drawTranslucent { alpha ->
-                for (i in 0 until LIQUID_SEGMENTS) {
-                    val t0 = i.toFloat() / LIQUID_SEGMENTS
-                    val t1 = (i + 1).toFloat() / LIQUID_SEGMENTS
-                    // The column narrows as it accelerates away from the mouth.
-                    val r = LIQUID_RADIUS * (1f - 0.45f * t0) * payload.stream
-                    cylinderBetween3(
-                        wobbled(at(t0), side, t0, timeS),
-                        wobbled(at(t1), side, t1, timeS),
-                        radius = r.coerceAtLeast(0.004f),
-                    )
-                    program.setModel(
-                        model, LIQUID[0], LIQUID[1], LIQUID[2],
-                        specular = 0.6f, shininess = 54f, alpha = alpha,
-                    )
-                    cyl.draw(program)
-                }
-                // Splash droplets thrown off where the column lands.
-                for (i in 0 until SPLASH_DROPS) {
-                    val seed = (i * 0.6180339f) % 1f
-                    val hop = (timeS * 1.9f + seed) % 1f
-                    val angle = seed * 2f * Math.PI.toFloat()
-                    val spray = 0.055f * hop
-                    val lift = 0.045f * sin(Math.PI.toFloat() * hop)
-                    val p = add(
-                        add(mouth, scale(side, cos(angle) * spray)),
-                        add(scale(out, sin(angle) * spray * 0.6f), scale(axis, lift)),
-                    )
-                    modelAt(p, 0.013f, 0.013f, 0.013f)
-                    program.setModel(
-                        model, LIQUID[0], LIQUID[1], LIQUID[2],
-                        specular = 0.7f, shininess = 60f, alpha = alpha * (1f - hop),
-                    )
-                    grain.draw(program)
-                }
-            }
+            // Fallback only. The liquid line normally works into station pipework (change 25.3),
+            // so this runs unattached -- but straight down under gravity is at least the right
+            // shape, where the version it replaces arced out to a fixed point in mid-air and, when
+            // collecting, played upside down so liquid rose out of the open vessel.
+            val landing = add(mouth, floatArrayOf(0f, -STREAM_DROP, 0f))
+            drawFallingLiquid(mouth, landing, payload.stream, FALL_BREAKUP, timeS)
+            drawSplash(landing, payload.stream, timeS)
         }
     }
-
-    /** A gentle sideways wobble along the liquid column, so it is not a dead straight tube. */
-    private fun wobbled(p: FloatArray, side: FloatArray, t: Float, timeS: Float): FloatArray =
-        add(p, scale(side, sin(t * 7f + timeS * 3.4f) * 0.012f))
 
     /**
      * Draw translucent geometry.
@@ -1026,6 +1262,17 @@ class SceneRenderer(
         const val PUMP_TUBE_SEGMENTS = 10
         const val PUMP_NOZZLE = 0.034f
 
+        /**
+         * The flexible tube's sweep round the race, in half-turns: from straight up out of the
+         * hopper, round the front, to pointing down and outward.
+         *
+         * Shared with [liquidNozzle] since change 25.3, which has to know where the tube ends in
+         * order to put the station's funnel there. Inlining the sweep in two places is exactly how
+         * the funnel would drift off the dispenser the next time this is tuned.
+         */
+        const val PUMP_TUBE_FROM = 0.50f
+        const val PUMP_TUBE_ARC = 1.15f
+
         const val STREAM_REACH = 0.34f
         const val STREAM_DROP = 0.26f
         const val POWDER_GRAINS = 40
@@ -1041,6 +1288,65 @@ class SceneRenderer(
         const val SPLASH_DROPS = 6
         const val RIPPLE_RINGS = 3
 
+
+        // Station pipework (change 25.3).
+        /** Clear enough to read the liquid inside, solid enough to read as glass rather than haze. */
+        const val PIPE_ALPHA = 0.30f
+        const val PIPE_RADIUS = 0.042f
+        const val PIPE_RUN = 0.62f
+
+        /** Height of the bell on the tool end of the riser, and its wide radius. */
+        const val PIPE_BELL = 0.055f
+        const val PIPE_BELL_R = 0.062f
+
+        /** How far the bell's lip stands past the tool, so the nozzle is enclosed, not abutting. */
+        const val PIPE_LIP = 0.026f
+
+        /** Standoff from the vessel mouth to a discharge spout, so the fall into it is visible. */
+        const val PIPE_SPOUT_GAP = 0.085f
+
+        // Falling liquid (change 25.2).
+        /**
+         * Speed the stream leaves at, as a fraction of its speed on landing. Sets how hard the
+         * column necks down: radius goes as 1/sqrt(v), so 0.45 narrows it to about 54% by the
+         * bottom of the fall.
+         */
+        const val EXIT_SPEED = 0.45f
+
+        /** Fraction of a free fall that holds together before breaking into drops. */
+        const val FALL_BREAKUP = 0.55f
+
+        /** Inside a riser the jet is guided and contained, so it stays coherent much further. */
+        const val PIPE_BREAKUP = 0.80f
+
+        /**
+         * Cylinders stacked to fake the column's taper, and how far each overlaps the next.
+         *
+         * Fine enough that the radius step between neighbours is sub-pixel; see [drawFallingLiquid]
+         * for why a coarse stack reads as a corkscrew.
+         */
+        const val COLUMN_SEGMENTS = 30
+
+        /**
+         * How far each column segment runs into the next, as a fraction of the fall.
+         *
+         * Only needs to close the hairline where two segments butt; with depth writes on (see
+         * [drawFallingLiquid]) the overlapped geometry is discarded rather than blended, so this no
+         * longer has to be big enough to hide a shading seam.
+         */
+        const val COLUMN_OVERLAP = 0.003f
+
+        const val FALL_DROPS = 11
+        const val FALL_RATE = 1.15f
+
+        /** Jitter on a drop's release phase, so the tail is not an evenly spaced necklace. */
+        const val DROP_JITTER = 0.055f
+
+        /** Lateral drift of a shed drop, growing with distance from the breakup point. */
+        const val FALL_WANDER = 0.012f
+
+        const val SPLASH_SPREAD = 0.055f
+        const val SPLASH_LIFT = 0.042f
 
         /** Band over which the hand's side axis blends to the turret fallback (change 13.3). */
         const val SIDE_BLEND_LO = 0.03f
