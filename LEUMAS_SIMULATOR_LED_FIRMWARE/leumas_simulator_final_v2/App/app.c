@@ -24,13 +24,23 @@ void app_init(TIM_HandleTypeDef *led_tim, uint32_t led_ch,
 
 void app_tick(void)
 {
-    /* Take any typed command first. */
+    /* Take any typed command first, then anything the app has sent. */
     led_cmd_poll();
+    ble_poll();
 
-    /* There is one sequence and one way in: the board button starts Solid
-     * Sequence 1 from cycle 1, and so does `seq 1` on the console. Pressing it
-     * again mid-demo restarts cleanly. */
-    if (button_poll()) {
+    /* Change 16.1: NOTHING lights up on its own. The rig sits dark from power-on
+     * until somebody asks for a run, and there are exactly two ways to ask:
+     * START over BLE, which is the app's start button once it has shown the
+     * recipe, and the board button for bench work without a phone. `seq 1` on
+     * the console is the third, and goes through led_cmd_poll() above.
+     *
+     * The BLE path is the one that matters for coordination, not just for
+     * gating: when the app starts the run it knows t=0 exactly, so its arm
+     * animation and the board's colour changes begin from the same instant
+     * rather than the app having to infer the start from the first cue.
+     *
+     * Either source restarts cleanly mid-demo. */
+    if (button_poll() || ble_take_start()) {
         solid_seq1_start();
     }
 

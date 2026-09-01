@@ -155,12 +155,12 @@ _Static_assert(SS1_GRAV_CHARGE_MS + SS1_INITIAL_PROCESS_MS < SS1_T_CARRY,
 _Static_assert(SS1_LOT_TAIL_MS < 2u * SS1_T_CARRY,
                "a lot must ship before the next lot's second material lands");
 
-/* The blender likewise has to be empty and dark before the arm's next pour into
- * it — the macro dump one carry after the gravimetric's. Blend, then hand off
- * on 14..16, and be gone. */
-_Static_assert(SS1_BLEND_RUN_MS + SS1_XFER_FLOW_MS
-                   < SS1_T_CARRY + SS1_ARM_AT_DEST_MS - SS1_ARM_DUMP_END_MS,
-               "the blender must be empty again before the arm's next dump");
+/* The blender likewise has to be empty and dark before the next material lands
+ * in it. Change 16.3 moved that landing to the END of the pour, so consecutive
+ * ones are exactly one carry apart and the margin is simply SS1_T_CARRY. Blend,
+ * hand off on 14..16, and be gone with time to spare. */
+_Static_assert(SS1_BLEND_RUN_MS + SS1_XFER_FLOW_MS < SS1_T_CARRY,
+               "the blender must be empty again before the next material lands");
 
 /* ======================================================================
  * Animators
@@ -272,6 +272,9 @@ typedef struct {
  *
  *   BLENDER       collects two materials, blends, ships to packaging on the
  *                 14..16 flow. Runs entirely underneath the arm's carries.
+ *                 Change 16.4: DARK while it holds the first material and
+ *                 waits a whole carry for the second — blue is reserved for
+ *                 the blend itself, so the module is never lit doing nothing.
  *
  *   PACKAGING     takes ONE batch (change 13.3), finishes the lot, ships it out
  *                 on the 17..21 flow and emits LOT:DONE — one lot per cycle.
@@ -335,8 +338,9 @@ typedef struct {
 
 typedef enum {
     BL_EMPTY = 0,  /* dark, waiting for the first material of a batch        */
-    BL_RECEIVING,  /* blue, holding material, waiting for the rest of it      */
-    BL_BLENDING,   /* blue, both materials in, mixing                        */
+    BL_HOLDING,    /* DARK, holding one material, waiting a whole carry for  */
+                   /* the other -- change 16.4, see below                    */
+    BL_BLENDING,   /* blue, both materials in, actually mixing              */
     BL_SHIPPING    /* green, handing off to packaging on the 14..16 flow     */
 } Ss1BlenderPhase;
 
@@ -717,26 +721,31 @@ static void blender_reset(void)
     timer_stop(&s_blender_timer);
 }
 
-/* Change 12.2: the arm has arrived and is pouring, so the blender goes BLUE the
- * moment it receives — it no longer blanks first. A module the robot is
- * actively dumping into is working, not idle. */
-static void blender_receiving(void)
-{
-    set_mod(SS1_SLOT_BLENDER, MOD_RUNNING);
-    if (s_blender == BL_EMPTY) {
-        s_blender = BL_RECEIVING;
-    }
-}
-
-/* The pour has finished: that material is now actually in. */
+/* The pour has finished and that material is now actually in — not when the arm
+ * arrives and starts pouring, but when it has finished. Change 16.3: a module
+ * turns blue the moment DISPENSING IS DONE, not the moment it begins.
+ *
+ * Change 16.4, the stale period. The blender used to go blue on the first pour
+ * and then stand there blue until the second one arrived a whole carry later:
+ * 96 seconds of a lit module doing nothing, which is exactly the dead air the
+ * requirement calls out. Blue has to mean "this module is working", so while it
+ * holds one material and waits for the other it now stays DARK, and it lights
+ * only when it has both and is genuinely mixing. The blue window is therefore
+ * SS1_BLEND_RUN_MS and nothing else. */
 static void blender_material_in(void)
 {
     if (s_blender_materials < SS1_MATERIALS_PER_BATCH) {
         s_blender_materials++;
+    } else {
+        return;                      /* a full blender cannot take more */
     }
-    if (s_blender_materials >= SS1_MATERIALS_PER_BATCH && s_blender == BL_RECEIVING) {
+
+    if (s_blender_materials >= SS1_MATERIALS_PER_BATCH) {
+        set_mod(SS1_SLOT_BLENDER, MOD_RUNNING);   /* blue: mixing, right now  */
         s_blender = BL_BLENDING;
         timer_start(&s_blender_timer, SS1_BLEND_RUN_MS);
+    } else {
+        s_blender = BL_HOLDING;                   /* dark, and honestly so    */
     }
 }
 
@@ -756,7 +765,7 @@ static void blender_tick(void)
 
     case BL_SHIPPING:
         if (ss1_flow_done(&s_flow_xfer)) {
-            /* The batch has physically left; the blender is empty and free for
+            /* The batch has physically left; the blender is dark and free for
              * the arm's next delivery, which is already on its way. Change
              * 13.3: that batch IS a lot, so packaging starts on it at once
              * rather than banking it and waiting for a second. The assert on
@@ -852,12 +861,15 @@ static void enter_step(Ss1Step s)
         ms = SS1_T_CROSS_TO_DEST;
         break;
 
-    /* The arm has arrived and is pouring. Change 12.2: the blender goes blue on
-     * receiving. Change 11.4: that is also the moment the source it came from
-     * starts recharging — both of which now run underneath the arm's next
-     * carry rather than stopping it. */
+    /* The arm has arrived and is pouring. Change 11.4: this is the moment the
+     * source it came from starts recharging, underneath the arm's next carry
+     * rather than stopping it.
+     *
+     * The blender is deliberately NOT touched here. Change 16.3 moved its
+     * colour to the END of the pour (S_CARRY_HOME), because blue is supposed to
+     * mean the module is working and a module being poured into has not started
+     * working yet. */
     case S_CARRY_DUMP:
-        blender_receiving();
         /* A recharge exists so this feeder is green again for the arm's NEXT
          * visit, which is SS1_CARRIES_PER_CYCLE carries away. After the last
          * one there is no next visit, so the feeders wind down dark rather than
@@ -880,9 +892,11 @@ static void enter_step(Ss1Step s)
         ms = SS1_T_DUMP_HOLD;
         break;
 
-    /* The pour is finished; the arm retracts and goes home. The wait includes a
-     * beat stood at rail centre, so the next MOVE never lands while the
-     * previous animation is still playing. */
+    /* The pour is finished — changes 16.3/16.4 make this the instant the blender
+     * reacts, not the start of the pour: the second material landing here is
+     * what turns it blue and starts the blend. The arm then retracts and goes
+     * home; the wait includes a beat stood at rail centre, so the next MOVE
+     * never lands while the previous animation is still playing. */
     case S_CARRY_HOME:
         blender_material_in();
         ms = SS1_T_GO_HOME;

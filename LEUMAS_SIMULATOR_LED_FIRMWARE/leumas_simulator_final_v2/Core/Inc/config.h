@@ -178,7 +178,12 @@ extern const SlotLeds SLOT_LEDS[MODULE_COUNT];
  * centre and the audience waits on a colour change. Shortened to 12 s, which
  * still reads clearly from across a room but stops the board-only phases
  * dominating the cycle. */
-#define SS1_BLEND_RUN_MS         12000u
+/* Change 16.4: was 12 s. The blender is now dark while it holds the first
+ * material and only goes blue when the second pour lands, so this is the entire
+ * time it spends blue -- it is no longer a window the audience waits through,
+ * it IS the blend. Short and purposeful: blue, then green, then the 14..16 flow
+ * starts on the same pass with nothing in between. */
+#define SS1_BLEND_RUN_MS          5000u
 /* How long packaging takes to finish after the last material reaches it.
  * Change 11.3: was 20 s, same reasoning as the blender above. */
 #define SS1_PACKAGING_FINISH_MS  12000u

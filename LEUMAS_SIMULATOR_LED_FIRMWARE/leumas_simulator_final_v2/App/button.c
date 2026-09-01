@@ -25,6 +25,12 @@ void button_init(void)
 {
     s_last_edge = 0;
     s_pending   = false;
+    /* Change 16.1: the rig must be dark until somebody presses START, so a
+     * press latched before we booted -- or an edge thrown by the reset itself,
+     * which is the usual way a demo "starts on its own" -- must not come back
+     * as a start the moment the main loop opens. Drop any pending EXTI for our
+     * pin before the first button_poll() can see it. */
+    __HAL_GPIO_EXTI_CLEAR_IT(BUTTON_PIN);
 }
 
 void button_on_exti(uint16_t gpio_pin)
