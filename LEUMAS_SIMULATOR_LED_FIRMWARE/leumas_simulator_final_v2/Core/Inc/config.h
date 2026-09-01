@@ -108,7 +108,9 @@ extern const SlotLeds SLOT_LEDS[MODULE_COUNT];
  * module along it; the rest are mapped and waiting for a sequence of their
  * own. */
 #define SS1_SLOT_LMACRO1       6u   /* LMacro1,   px 85-87, status 22-26  */
+#define SS1_SLOT_LMACRO2       7u   /* LMacro2,   px 80-82, status 22-31  */
 #define SS1_SLOT_VESSEL1       8u   /* Vessel1,   px 70-71, status 22-33  */
+#define SS1_SLOT_VESSEL2       9u   /* Vessel2,   px 66-67, status 22-35  */
 #define SS1_SLOT_BOTTLING     10u   /* Bottling,  px 73-74, status 22-38  */
 
 /* Everything else on the board is dark for the whole run. */
@@ -118,7 +120,7 @@ extern const SlotLeds SLOT_LEDS[MODULE_COUNT];
 #define SS1_ACTIVE_MASK   ( (1u << SS1_SLOT_MACRO1)   | (1u << SS1_SLOT_MACRO)        | \
                             (1u << SS1_SLOT_GRAVIMETRIC) | (1u << SS1_SLOT_BLENDER1)  | \
                             (1u << SS1_SLOT_BLENDER) | (1u << SS1_SLOT_PACKAGING)     | \
-                            (1u << SS1_SLOT_LMACRO1) | (1u << SS1_SLOT_VESSEL1)       | \
+                            (1u << SS1_SLOT_LMACRO2) | (1u << SS1_SLOT_VESSEL2)       | \
                             (1u << SS1_SLOT_BOTTLING) )
 
 /* Module pixels are ALWAYS full brightness — the strip percentage above never
@@ -278,9 +280,11 @@ extern const SlotLeds SLOT_LEDS[MODULE_COUNT];
  * the first module on the line has the shortest). A slower per-pixel dwell keeps
  * its recharge from being over before the eye finds it, while still leaving it
  * the quickest of the three, which is what the map says it should be. */
-/* The liquid macro's status run is five pixels (22..26). Paced between the two
- * solid macros so the three lines read as the same machine. */
-#define SS1_CHARGE_FILL_LIQUID_MS  460u  /* per pixel, 5-pixel span           */
+/* Liquid macro 2's status run is TEN pixels (22..31), and sequence 3 collects it
+ * on every carry -- so it has one carry, not two, to recharge and produce in.
+ * That is what sets this: 3 * 10 * 300 + 1000 = 10 s, leaving 2 s of margin on
+ * the 32 s window. The assert in solid_seq.c is the real guard. */
+#define SS1_CHARGE_FILL_LIQUID_MS  300u  /* per pixel, 10-pixel span          */
 #define SS1_CHARGE_FILL_MACRO1_MS  700u  /* per pixel, 2-pixel span           */
 #define SS1_CHARGE_FILL_MACRO_MS   420u  /* per pixel, 6-pixel span           */
 /* Change 12.3: eased off from 300 — the gravimetric was reading as a flicker

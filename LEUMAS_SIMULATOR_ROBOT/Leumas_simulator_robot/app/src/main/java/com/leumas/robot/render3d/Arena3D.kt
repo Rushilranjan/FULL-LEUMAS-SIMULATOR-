@@ -45,10 +45,33 @@ object Arena3D {
      */
     const val HOME_YAW = -0.42f
 
-    // Arm segment lengths in world units (lower + upper give the vertical reach; forearm is held
-    // horizontal by the parallelogram and adds pure horizontal extension).
-    const val LOWER_ARM = 0.50f
-    const val UPPER_ARM = 0.42f
+    /**
+     * Arm segment lengths in world units. Lower + upper give the vertical reach; the forearm is
+     * held horizontal by the parallelogram and adds pure horizontal extension.
+     *
+     * **Change 24 lengthened these (0.50/0.42 -> 0.66/0.55) because the arm was too short for its
+     * own workspace.** Measured against the old [MAX_WRIST] of 0.892:
+     *
+     *     TOP edge      wrist 1.082    121% of envelope    clamped
+     *     mid           wrist 0.570     64%                elbow 76 deg
+     *     BOTTOM edge   wrist 1.048    117% of envelope    clamped
+     *
+     * Both extremes were past the envelope, so [clampToReach] pinned the arm at full extension —
+     * and a fully extended two-link arm IS a straight line. At the bottom that read as a backhoe:
+     * a rigid spar stooping 57 degrees with the forearm jutting out horizontally. It could not
+     * articulate because there was nothing left to articulate with. The top was equally straight;
+     * reaching up just reads as "crane" rather than "digger", so nobody complained.
+     *
+     * At 0.66/0.55 the envelope is 1.174 and both ends come inside it — 92% at the top, 89% at the
+     * bottom, elbow around 126 and 120 degrees. The solver actually solves, and the pose is a bent
+     * arm rather than a pointed stick. Nothing else moves: the calibration mapping, [REACH_DEPTH]
+     * and [SERVICE_STANDOFF] are untouched, so the arm still points where the operator calibrated.
+     *
+     * The ratio is kept at roughly 1.2:1 so the machine's proportions are unchanged; it is simply
+     * bigger. If these change again, re-check [STOW] — it is the pose that breaks first.
+     */
+    const val LOWER_ARM = 0.66f
+    const val UPPER_ARM = 0.55f
     const val FOREARM = 0.22f
 
     /**
@@ -78,6 +101,12 @@ object Arena3D {
      * now (change 14.1), but -0.40 also hung the bucket entirely below the visible bottom, so a pour
      * into a Vessel or Bottling played off-screen. At -0.26 the bucket straddles the bottom edge,
      * matching how the side edges already behave.
+     *
+     * Change 24 briefly raised this to 0.10 to stop the arm digging at the bottom, and put it back:
+     * this is NOT a bottom-only knob. It is the far end of the vertical lerp in [worldTargetFor]
+     * for *every* edge, so raising it moves the blenders up too and re-maps every calibrated point
+     * — the arm would stop pointing at the real modules. The digging was fixed by lengthening the
+     * arm instead; see [LOWER_ARM].
      */
     const val BOTTOM_Y = -0.26f
 
@@ -124,12 +153,21 @@ object Arena3D {
      * genuinely in front, which is the palletiser's real geometry and reads as a machine at the
      * ready rather than a post.
      *
-     * The old values (0.34, -0.60) and (0.42, -0.36) both failed that test.
+     * The old values (0.34, -0.60) and (0.42, -0.36) both failed that test, and so did
+     * (0.72, -0.62) once change 24 lengthened the arm: alpha grows with the links, and that pose
+     * went from 78 degrees to 94 — over the limit, elbow behind the turret, red column. Longer arms
+     * need their parking targets further out, not further down.
+     *
+     *     STOW   (0.72, -0.62) -> (0.95, -0.55)   theta+alpha 94.2 -> 73.6
+     *     CARRY  (0.74, -0.30) -> (0.90, -0.28)   theta+alpha 81.5 -> 68.4
+     *
+     * CARRY was not actually broken at 81.5, but it sat close to the limit with the longer links
+     * and held the payload near the base; 0.90 restores the margin on both counts.
      */
-    val STOW = Vec2(0.72f, -0.62f)
+    val STOW = Vec2(0.95f, -0.55f)
 
     /** Arm out and a little lowered, holding the payload clear of the base. */
-    val CARRY = Vec2(0.74f, -0.30f)
+    val CARRY = Vec2(0.90f, -0.28f)
 
     /**
      * World position the gripper is aiming for, straight from the normalised calibration point.

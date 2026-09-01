@@ -156,6 +156,18 @@ _Static_assert(SS1_ARM_DUMP_END_MS < SS1_T_CARRY + SS1_ARM_TO_SOURCE_MS,
 _Static_assert(SS1_RECEIVE_ACK_MS < SS1_T_CARRY,
                "the receive acknowledgement must end before the next material lands");
 
+/* Sequence 3 collects its ONE feeder on EVERY carry, so it has a single carry to
+ * recharge and produce in -- every other sequence gets at least two. The window
+ * runs from the arm lifting away (when the recharge starts, change 23) to the
+ * arm being stood in front of it again on the next carry. Blow this and the arm
+ * arrives at a module that is not green yet. */
+#define SS1_LIQUID_SPAN_LEN  10u
+#define SS1_LMACRO_CHARGE_MS SS1_CHARGE_MS(SS1_LIQUID_SPAN_LEN, SS1_CHARGE_FILL_LIQUID_MS)
+
+_Static_assert(SS1_LMACRO_CHARGE_MS + SS1_INITIAL_PROCESS_MS
+                   < SS1_T_CARRY + SS1_ARM_TO_SOURCE_MS - SS1_ARM_COLLECT_END_MS,
+               "the liquid macro must be green again before the arm returns for it");
+
 /* ======================================================================
  * Animators
  *
@@ -326,10 +338,10 @@ static const Ss1CarrySpec SEQ2_CARRIES[] = {
  * has one carry rather than two to recharge and produce in (hence the recharge
  * moving to the moment the arm lifts away, change 23). */
 static const Ss1FeederSpec SEQ3_FEEDERS[] = {
-    { SS1_SLOT_LMACRO1, SS1_CHARGE_FILL_LIQUID_MS },
+    { SS1_SLOT_LMACRO2, SS1_CHARGE_FILL_LIQUID_MS },
 };
 static const Ss1BlenderSpec SEQ3_BLENDERS[] = {
-    { SS1_SLOT_VESSEL1, 1u },   /* one dose is a batch */
+    { SS1_SLOT_VESSEL2, 1u },   /* one dose is a batch */
 };
 static const Ss1CarrySpec SEQ3_CARRIES[] = {
     { 0u, 0u },   /* liquid macro -> vessel */
