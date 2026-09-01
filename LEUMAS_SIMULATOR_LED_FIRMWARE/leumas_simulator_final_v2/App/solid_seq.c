@@ -17,12 +17,18 @@
 /* ---- strip spans ---------------------------------------------------------
  * Every span comes straight out of SLOT_LEDS, so the requirement's LED indices
  * and the rig's pixel map are the same numbers and can never drift apart. A
- * feeder fills its own status run; a blender's hand-off starts one pixel past
- * its own run and ends at its destination's, which is how the cumulative map
- * encodes "material moved further along the line". */
+ * feeder fills its own status run; a blender's hand-off runs from its own last
+ * pixel to its destination's, which is how the cumulative map encodes "material
+ * moved further along the line".
+ *
+ * Change 22: the hand-off used to start one pixel PAST the source, so blender 1
+ * swept 12..16 while its own fill ended at 11 -- the material appeared to start
+ * one pixel clear of the module it was leaving, with a dark gap between them.
+ * Starting on the source's own end pixel makes the sweep visibly leave the
+ * module. Blender 1 now runs 11..16 and blender 2 runs 13..16. */
 #define SS1_SPAN_A(slot)   (SLOT_LEDS[slot].st_base)
 #define SS1_SPAN_B(slot)   (SLOT_LEDS[slot].st_end)
-#define SS1_FLOW_A(from)   ((uint8_t)(SLOT_LEDS[from].st_end + 1u))
+#define SS1_FLOW_A(from)   (SLOT_LEDS[from].st_end)
 #define SS1_FLOW_B(to)     (SLOT_LEDS[to].st_end)
 
 #define SS1_OUT_A     ((uint8_t)SOLID_EXIT_A)                             /* 17 */

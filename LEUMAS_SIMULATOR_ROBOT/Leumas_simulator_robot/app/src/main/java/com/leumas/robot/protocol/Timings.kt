@@ -48,11 +48,16 @@ object Timings {
      * Blender -> packaging strip hand-off, replacing the deleted `TRANSFER_SWIPE_MS`.
      *
      * Derived, not a firmware constant: the flow animator fills LEDs 14..16 one at a time and
-     * repeats, so one pass is `span * SS1_FLOW_STEP_MS + SS1_FLOW_BLANK_MS` = 3*700 + 1200 = 3300 ms,
-     * and `SS1_FLOW_XFER_PASSES` is 3 since change 17.7. The conveyor band here must last exactly
-     * as long or the two visibly drift apart.
+     * repeats. Change 22 made the sweep start on the blender's OWN last pixel rather than one past
+     * it, so sequence 1's hand-off is LEDs 13..16 - four pixels, one pass `4*700 + 1200` = 4000 ms,
+     * three passes since change 17.7 = 12000 ms. The conveyor band here must last exactly as long
+     * or the two visibly drift apart.
+     *
+     * Sequence 2's blender 1 runs 11..16 and takes 16200 ms, which this does not describe: the
+     * constant mirrors sequence 1, and nothing consumes it yet. If a conveyor is ever drawn again
+     * it has to come from the running sequence, not from here.
      */
-    const val TRANSFER_SWIPE_MS = 9_900L
+    const val TRANSFER_SWIPE_MS = 12_000L
 
     /**
      * The final "lot shipped" flow, started by `LOT:DONE`.
