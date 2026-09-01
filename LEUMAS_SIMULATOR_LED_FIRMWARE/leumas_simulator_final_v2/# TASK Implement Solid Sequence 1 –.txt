@@ -395,77 +395,11 @@ Do NOT make this a fast chase animation.
 
 ---
 
-## MACRO RECHARGE ANIMATION
 
-### Stage 1
-
-Slowly swipe:
-
-```text
-0 → 1 → 2 → 3 → 4 → 5
-```
-
-After the swipe:
-
-```text
-0,1 = SOLID
-```
-
-The completed section remains ON.
 
 ---
 
-### Stage 2
 
-Slowly swipe:
-
-```text
-2 → 3 → 4 → 5
-```
-
-While:
-
-```text
-0,1
-```
-
-remain solid.
-
-After the swipe:
-
-```text
-0,1,2,3 = SOLID
-```
-
----
-
-### Stage 3
-
-Slowly swipe:
-
-```text
-4 → 5
-```
-
-While:
-
-```text
-0,1,2,3
-```
-
-remain solid.
-
-After the swipe:
-
-```text
-0,1,2,3,4,5 = SOLID
-```
-
-Macro recharge is now complete.
-
-The completed recharge section should remain illuminated until the sequence tells it to reset.
-
----
 
 # 12. MACRO RECHARGE COMPLETE
 
@@ -585,16 +519,6 @@ The audience must visually understand that the Gravimetric module is progressive
 # 16. GRAVIMETRIC RECHARGE BEHAVIOR
 
 Use the same progressive concept:
-
-1. Swipe through the available LEDs.
-2. Keep the completed portion solid.
-3. Continue from the next uncharged LED.
-4. Gradually increase the number of permanently illuminated LEDs.
-5. Finish with:
-
-```text
-0,1,2,3,4,5,6,7,8,9 = SOLID
-```
 
 The exact stage grouping can be chosen logically based on the existing Macro recharge implementation, but the animation must clearly communicate progressive charging.
 
@@ -1105,3 +1029,50 @@ Treat it as a **small deterministic production-process state machine with concur
 The physical hardware mapping is already fixed.
 
 Your job is to implement the sequence on top of the existing architecture, not redesign the system.
+
+
+10) sequence 1 changes after trial run:
+
+1) make each module run for 20 seconds in each state( they run for 10 seconds in each state rn ig)
+2) the time I tell always doesn't match with actual time, like if I say make a module run for 10 secs it only runs for 5 seconds in reality
+3) the led strip animation changes: 
+   recharge animation: for module 2: -led indices is from 0-5 
+                                     - lets not use swipe animation, instead 0 solid 1 solid....4 solid 5 solid, then all 1ST LED ON for 1st time, till 3rd led on till 2nd time then all for 3rd time 
+repeat 3 times and once recharge animation is complete turn the leds off don't keep them on 
+    recharge animation for module 3: -led indices is from 0-9 
+                                     - same animation as module 2 but increase the speed as compared to module 2 as we have double the led and it shouldn't look like its taking too much time ,make sure the time is slightly more than module 2 recharge 
+4) the sequence doesn't seem to be coordinationg with each module, like modules light up there states before robot arrives or turn of before robot left,or start running before actual material had to be transferred to them pls cnfirm the process to me before coding .
+add significant amount of delays/time between each module to make everything work perfectly.
+
+5)do deep root cause analysis make everything work perfectly and very smoothly along with the robot.
+
+11)
+1.the robotic movements are not matching with the module colours turning on and off according to the sequence. Remove the delays and make the entire sequence perfectly align with robot movements to the modules.
+
+2.the led strip movement should just be 1 solid, 2 solid, 3 solid...off and then repeat (don't want, remove that 1 3 5 scheme)
+
+3.the time taken for blender and packaging module to go blue and then green to start dispensing then led strip is too slow, increase it slighly
+
+4.solid macro module should start getting charged the moment blender starts working (blue), then later gravimetry
+
+5.Do deep analysis and make the whole sequence perfect and coordinating between modules and robot
+
+12)
+1. the sequence should not do one task at a time, don't use delays like that, the tasks should happen simultaneously 
+
+2. the moment the robot collects from a module, it should turn from green to off, the moment the robot dumps to one module it should turn blue then eventually green 
+
+3.led is good, just reduce speed of the led for gravimetry slightly 
+
+4. go through the whole sequence again in this file, change robot or change firmware accordingly to make the whole sequence perfect
+
+
+13)
+
+1. module 3  should not turn green the same time as module 2, module 3 should turn green once the robot dumps module 2 material to module5 
+
+2. 1 cycle is just the macro, gravi dumping to blender once, blender to bottling, then bottling sends exit strip. The app should update the current cycle 2 after the first lot is done, then so on until cycle 4 is done
+right now what u are doing is that after 3rd recharge it shows cycle 2 and resets. After 1st recharge, it should directly say cycle 2 on the app and start running other processes simultaneously/parallelly and not reset.
+
+3. The bottling module waits for 3 charges from blender and then only sends exit strip, it should send the exit strip after receiving only 1 charge (then next cycle starts).
+

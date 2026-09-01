@@ -33,21 +33,54 @@ Four modules take part. Everything else on the board — including the whole liq
 
 ### One cycle
 
-1. **Macro and Gravimetric both run** for 10 s. Macro finishes and goes green.
-2. **Robot collects the macro material** (10 s) and **dumps it into the blender** (10 s). The
-   gravimetric finishes partway through the dump and goes green. The blender starts running.
-3. **Robot collects the gravimetric material** (10 s) — and *at the same time* the macro **recharges**
-   on strip pixels 0-5. When the recharge finishes the macro goes blue: it is running again.
-4. **Robot dumps the gravimetric material into the blender** (10 s) and returns home.
-5. **The gravimetric recharges** on pixels 0-9 while the blender runs and hands off. When it finishes,
-   the gravimetric goes blue.
-6. **Blender → Packaging.** No robot movement: material flows along pixels **14-16**, four times.
-   Packaging then goes blue.
-7. **The second macro and gravimetric carries** repeat steps 2-4 with the same visual logic.
-8. **Packaging → output.** Packaging goes green and material flows out along pixels **17-21**.
-9. The board blanks, everything resets, and the next cycle begins.
+A cycle is **one lot**: the macro and the gravimetric each dumped into the blender once, blended,
+packaged, and put out on the exit strip. Two robot carries, one blender batch, one `LOT:DONE`.
 
-One cycle is about **2 min 10 s**; four cycles about **8 min 40 s**.
+1. **Macro and Gravimetric both run** for 20 s. The macro finishes and goes **green**. The
+   gravimetric finishes too, but **holds blue** — it is not allowed to go green beside the macro.
+2. **Robot collects the macro material** (20 s stood at the module) and **dumps it into the blender**
+   (20 s stood pouring). Three things happen on that dump: the blender goes **blue**, the macro
+   starts **recharging** on strip pixels 0-5, and the **gravimetric goes green** — the macro's
+   material landing in the blender is exactly what releases it.
+3. **Robot collects the gravimetric material** and dumps it into the blender. That dump starts the
+   gravimetric's own recharge on pixels 0-9. When either recharge finishes, its module goes blue and
+   starts producing again.
+4. **Blender → Packaging.** No robot movement: the blender goes green, then material flows along
+   pixels **14-16**, four times. The blender then goes dark.
+5. **Packaging → output.** Packaging goes blue on receiving, finishes the lot, goes green, and puts
+   it out along pixels **17-21**, twice. `LOT:DONE` goes out and the cycle counter ticks over.
+
+**Nothing is reset and the board is never blanked at a cycle boundary.** Steps 4 and 5 play
+*underneath* the arm, which has already set off on the next cycle's macro carry — the plant runs
+roughly a cycle behind it, and the arm never waits for either. All eight carries of a run are cued
+61.5 s apart, from the first to the last, with no pause anywhere.
+
+Lots therefore ship every **123 s**, and the whole four-cycle run takes **9 min 11 s** from `SEQ:1`
+to the last `LOT:DONE`.
+
+### Why a carry takes 58.5 seconds
+
+The BLE link is transmit-only, so the board cannot ask the Android app where the arm is. The two
+therefore run as **open-loop clocks driven from the same constants**: the `SS1_ARM_*` block in
+`Core/Inc/config.h` is a phase-for-phase copy of `RobotPhase` in the app's `RobotStateMachine.kt`,
+and a `_Static_assert` in `solid_seq1.c` fails the build if the totals stop matching.
+
+That is what lets every module colour change fire while the arm is visibly in front of it:
+
+| after the `MOVE` cue | the arm is | the board does |
+|---|---|---|
+| 0 s | leaving home | source module already green |
+| 3.2 s | arriving at the module | — |
+| 6.3 s | gripper shut, **standing there collecting for 20 s** | — |
+| 26.3 s | lifting away | source module → **dark** |
+| 31.1 s | arriving at the blender | blender → **blue**, receiving; the source starts its recharge; on a macro carry, the gravimetric goes **green** |
+| 34.1 s | gripper open, **standing there pouring for 20 s** | — |
+| 54.1 s | retracting | that material is now in |
+| 58.5 s | back at rail centre | — |
+
+The arm then rests 3 s at home (`SS1_ARM_HOME_HOLD_MS`) before the next carry is cued, so two
+animations can never overlap. Half of each cycle is the arm standing still: that is what a 20-second
+collection looks like, and it is deliberate.
 
 ### What it looks like on the strip
 
@@ -73,20 +106,39 @@ Both are deliberately **slow** — this is a client-facing demo watched from 2-3
 chase. Everything the strip shows is one flag per pixel, so an animation can never leave a stray pixel
 behind it.
 
-**Recharge** (macro 0-5, gravimetric 0-9) is *progressive*. A head crawls from the first uncharged
-pixel to the end of the span; when it gets there the next `SS1_CHARGE_CHUNK` (2) pixels latch solid and
-the head restarts past them, so the charged section grows and each pass is shorter than the last. Over
-0-5 that is three stages — swipe `0→5` keep `0,1`; swipe `2→5` keep `0..3`; swipe `4→5` keep `0..5` —
-and the identical code over 0-9 gives five. The head and the charged pixels are the same white at 1 %:
-**motion alone** tells them apart, so what the audience sees is charge accumulating rather than an
-animation being played.
+**Recharge** (macro 0-5, gravimetric 0-9) is a level filling up, deliberately **not** a swipe — a
+travelling head reads as something moving *past* the module rather than charge going *into* it. Two
+stages, over the macro's 0-5:
+
+```
+STAGE 1   pixels latch on one at a time and stay lit, then the span blanks
+  0 . . . . .   0 1 . . . .   0 1 2 . . .
+  0 1 2 3 . .   0 1 2 3 4 .   0 1 2 3 4 5   ->  . . . . . .
+
+STAGE 2   three growing blocks, the group repeated three times
+  0 . . . . .  ->  blank        the first pixel
+  0 1 2 . . .  ->  blank        up to the third
+  0 1 2 3 4 5  ->  blank        all of them
+
+ALL OFF
+```
+
+The span then **stays dark**. A recharged module announces itself by its own LED going blue; leaving
+strip pixels lit only meant the macro's 0-5 was still on screen when the gravimetric started on the
+overlapping 0-9, and the two read as one animation glitching.
+
+Block extents come from one rule — `1`, `(len+1)/2`, `len` — which gives the requirement's 1/3/6 over
+six pixels and 1/5/10 over ten. The gravimetric span fills **faster per pixel** (450 ms against
+700 ms) so ten pixels do not drag, but still takes slightly longer overall (14.8 s against 14.5 s).
+Both facts are `_Static_assert`ed.
 
 **Material flow** (blender→packaging 14-16, packaging→output 17-21) fills its span one pixel at a
 time, holds it full for one step, blanks, and repeats. Over 14-16 that is `14` → `14,15` → `14,15,16` →
 dark, four times over. The all-dark hold **is** the gap between passes.
 
-To retune the whole demo, change `SS1_CHARGE_STEP_MS` and `SS1_FLOW_STEP_MS` in `Core/Inc/config.h` and
-nothing else. Every other duration is read in exactly one place.
+To retune the whole demo, change `SS1_CHARGE_FILL_MACRO_MS`, `SS1_CHARGE_FILL_GRAV_MS` and
+`SS1_FLOW_STEP_MS` in `Core/Inc/config.h` and nothing else. Every other duration is read in exactly
+one place.
 
 ### Concurrency
 
@@ -100,8 +152,20 @@ anywhere: every wait is a `SoftTimer` or a predicate, polled from `solid_seq1_ti
 The BLE link is **transmit-only** — `MOVE:a>b` goes out, nothing comes back. There is no `ARRIVED`
 acknowledgement and no `HOME` command, so the firmware cannot know where the arm actually is. One MOVE
 cue goes out **per material carry**, when that carry begins, and the Android app plays its own full
-travel/pick/place/return-home animation against it. That is also why the robot needs no reset between
-cycles: it parks itself. Four MOVE cues per cycle, sixteen per run.
+travel/collect/carry/pour/return-home animation against it. That is also why the robot needs no reset
+between cycles: it parks itself. Two MOVE cues per cycle, eight per run, all 61.5 s apart.
+
+Because there is no handshake, the two sides stay in step only by sharing constants. The `SS1_ARM_*`
+block in `Core/Inc/config.h` mirrors `RobotPhase` in the app's `RobotStateMachine.kt` phase for phase,
+and `solid_seq1.c` asserts the total at compile time:
+
+```c
+_Static_assert(SS1_ARM_TOTAL_MS == 58500u,
+               "SS1_ARM_* must sum to RobotPhase.TOTAL_MS in the Android app");
+```
+
+**Change a phase on one side and you must change the other.** If you retune the arm in the app, update
+`config.h` to match or the firmware will not build — which is the point. See the carry table above.
 
 ## Starting a sequence
 Type `seq 1` on the console, or press the board button — either starts Solid Sequence 1 from cycle 1.
@@ -321,10 +385,23 @@ through it in this order:
 Create an STM32F767ZI project (or open your `.ioc`) and configure:
 
 ### Clock
-The `.ioc` already sets this up: HSE bypass → PLL → **SYSCLK 192 MHz**, APB2 /1, so the **TIM1 counter
-clock is 96 MHz**. With **Counter Period (ARR) = 119** that gives 96 MHz / 120 = **800 kHz**, i.e. the
-1.25 µs WS2812B bit. If you change the clock tree, update `LED_TIM_HZ` in `App/led_strip.h` — the
-build-time assertions there will fail until the numbers are consistent again.
+The `.ioc` already sets this up: HSE 8 MHz bypass (from the ST-LINK MCO) → PLLM 4 → PLLN 96 → PLLP 2
+→ **SYSCLK 96 MHz**, AHB /1 → HCLK 96 MHz, APB2 /1, so the **TIM1 counter clock is 96 MHz**. With
+**Counter Period (ARR) = 119** that gives 96 MHz / 120 = **800 kHz**, i.e. the 1.25 µs WS2812B bit.
+
+> **192 MHz is the PLL's VCO output, not the system clock.** An earlier version of this file said
+> "SYSCLK 192 MHz", which is wrong and expensive to act on: "correcting" the clock tree to match it
+> would double HCLK, halve every WS2812B bit, and make `HAL_GetTick()` run at 2 kHz — so every
+> `SoftTimer` in the sequence would fire in half the time it was asked for.
+
+TIM1 and SysTick are driven from the *same* HCLK, which is a useful diagnostic: if the strip renders
+correct colours, the bit rate is 800 kHz, so HCLK is 96 MHz, so the millisecond tick is exactly
+1 kHz. A timing complaint with a working strip is never a clock fault.
+
+If you change the clock tree, update **both** `LED_TIM_HZ` and `LED_TIM_ARR` in `App/led_strip.h` by
+hand. The assertion in `led_strip.c` cross-checks those two against each other, but nothing can
+check `LED_TIM_HZ` against the actual silicon — `SystemClock_Config()`'s values are not constant
+expressions.
 
 ### TIM1 CH1 — the WS2812B strip on PE9
 - Mode **PWM Generation** on `CH1`, pin **PE9** (`GPIO_AF1_TIM1`), output speed **Very High**.
@@ -412,39 +489,59 @@ void HAL_TIM_ErrorCallback(TIM_HandleTypeDef *htim)     { app_on_tim_error(htim)
 
 8. `seq map` — check every row against the physical strip by eye before anything else. Macro2 49-51 /
    0-5, Gravimetric 53-55 / 0-9, Blender2 61-62 / 0-13, Packaging 76-77 / 0-16, exit 17-21.
-9. `seq 1`, then time one cycle with a stopwatch. Only slots 2, 3, 5 and 6 ever light; the whole liquid
-   line and status 22-43 stay dark throughout.
+9. `seq 1`, then follow the first two cycles with a stopwatch. Only slots 2, 3, 5 and 6 ever light;
+   the whole liquid line and status 22-43 stay dark throughout. Times are from `SEQ:1`.
 
     | t | What you should see |
     |---|---|
     | 0 s | Module 2 + 3 **blue**, everything else dark, strip dark |
-    | 10 s | Module 2 **green**; `MOVE:2>5` on the BLE line |
-    | 20 s | Module 2 dark, Module 5 dark |
-    | 25 s | Module 3 **green** |
-    | 30 s | Module 5 **blue**; `MOVE:3>5`; the **0→5 recharge head starts crawling** |
-    | ~40 s | Module 3 dark, Module 5 green; then Module 2 back to **blue** (recharge done) |
-    | 50 s | Module 5 **blue**; the **0→9 recharge** starts |
-    | 60 s | Module 5 **green**; 14→15→16 fills and blanks **four times** |
-    | ~70 s | Module 3 back to **blue** (recharge done) |
-    | ~73 s | Module 6 **blue**; Module 2 **green**; `MOVE:2>5` — the second half repeats |
-    | ~118 s | Module 6 **green**; 17→18→19→20→21 fills toward the output |
-    | ~130 s | board blanks, next cycle starts |
+    | 20 s | Module 2 **green** — and **Module 3 stays blue**; `MOVE:2>5`; the arm sets off |
+    | 46.3 s | Module 2 **dark** — the arm should be lifting away as it happens |
+    | 51.1 s | Module 5 **blue**; **Module 3 goes green**; the **0-5 recharge starts** — all three on the pour |
+    | 59.7 s | Module 2 back to **blue** (recharge done, strip 0-5 goes dark) |
+    | 79.7 s | Module 2 **green** again, waiting for its next carry |
+    | 81.5 s | `MOVE:3>5`; the arm sets off for the gravimetric |
+    | 107.8 s | Module 3 **dark**, the arm lifting away |
+    | 112.6 s | the **0-9 recharge** starts (Module 5 is already blue and stays blue) |
+    | 123.8 s | Module 3 back to **blue** (recharge done, strip 0-9 goes dark) |
+    | 143 s | `MOVE:2>5` — **cycle 2's first carry, while lot 1 is still in the plant** |
+    | 147.6 s | Module 5 **green**; 14→15→16 fills and blanks **four times** |
+    | 160.8 s | Module 5 **dark**; Module 6 **blue** |
+    | 172.8 s | Module 6 **green**; 17→18→19→20→21 fills toward the output, **twice** |
+    | 174.1 s | Module 5 **blue** again (cycle 2's macro going in); Module 3 **green** |
+    | 182.2 s | `LOT:DONE`. **The board does not blank and nothing resets** — the app moves to cycle 2 |
 
-10. **Recharge shape** — watch 0-5 at t=30 s. It must go `0,1,2,3,4,5` one at a time, then settle to
-    `0,1` solid; then `2,3,4,5` with `0,1` still lit, settling to `0..3`; then `4,5`, settling to
-    `0..5`. If it looks like a fast chase, raise `SS1_CHARGE_STEP_MS`.
-11. **Colours** — only blue, green and dark, all at full brightness. Nothing blinks. The strip is
+    From there it repeats every **123 s**: `LOT:DONE` at 182.2, 305.2, 428.2 and 551.2 s. After the
+    last carry is cued at 450.5 s there are no further `RUN:2` / `RUN:3` — with no next collection to
+    be ready for, the feeders stay dark and the last 100 s is the blender and packaging alone.
+
+10. **Recharge shape** — watch 0-5 from t=51.1 s. Pixels must light **one at a time and stay lit** —
+    `0`, `0,1`, `0,1,2` … `0..5` — then the whole span blanks, and that same fill runs again, three
+    passes in all (`SS1_CHARGE_REPEATS`); then **all off and staying off**. It is a level filling
+    up, not a chase, and there is no `1,3,5` grouping any more (change 11.2). If it looks fast,
+    raise `SS1_CHARGE_FILL_MACRO_MS`. If any pixel is still lit after the module goes blue,
+    something is wrong.
+
+11. **Arm agreement** (the point of the whole rework) — watch the Android arm and Module 2 together
+    from t=20 s. Module 2 must stay **green for the entire time the arm is stood at it**, and go
+    dark only as the arm starts to lift. If the module changes while the arm is still travelling,
+    the two sides' constants have drifted — check `SS1_ARM_*` against `RobotPhase`.
+12. **Colours** — only blue, green and dark, all at full brightness. Nothing blinks. The strip is
     white and clearly dimmer than the modules.
-12. **After cycle 4** (~8 min 40 s) the board is dark, `seq` reports **COMPLETE**, and cycle 5 does
-    **not** start.
-13. `red 20 30` mid-sequence → refused with the `seq stop` message, strip unchanged. `seq stop` → the
+13. **After cycle 4** (~9 min 11 s) the board is dark, `seq` reports **COMPLETE**, and cycle 5 does
+    **not** start. `seq` should read cycle 4 from t=428 s onward — the counter stops at the last
+    cycle rather than running on to 5.
+14. `red 20 30` mid-sequence → refused with the `seq stop` message, strip unchanged. `seq stop` → the
     strip blanks and manual commands work again. Watch the BLE line: **no further `MOVE:` messages**
     after `seq stop`.
-14. **Button** — press it mid-run: the demo restarts cleanly from cycle 1.
-15. **BLE** — one cycle should emit `SEQ:1` once, then exactly four `MOVE:` cues (`2>5`, `3>5`, `2>5`,
-    `3>5`) and one `LOT:DONE`, plus `RUN:`/`DONE:` on each module colour change. Confirm the Android
-    arm animates on each MOVE. Set `SS1_EMIT_RUN_DONE` to 0 for MOVE-only if the app would rather not
-    see the module cues.
+15. **Button** — press it mid-run: the demo restarts cleanly from cycle 1.
+16. **BLE** — a whole run emits `SEQ:1` **once** (never again — a cycle boundary is not a restart),
+    then exactly eight `MOVE:` cues alternating `2>5` / `3>5`, and exactly four `LOT:DONE`, plus
+    `RUN:`/`DONE:` on each module colour change. Consecutive `MOVE` cues must be **61.5 s apart**,
+    every time, including across a cycle boundary — the arm's 58.5 s animation plus its 3 s rest.
+    Watch for `DONE:3` never sharing a moment with `DONE:2`: it must arrive with the `RUN:5` of a
+    macro pour (change 13.1). There is no cycle message on the wire — the app counts `LOT:DONE`.
+    Set `SS1_EMIT_RUN_DONE` to 0 for MOVE-only if the app would rather not see the module cues.
 
 ## To tune / finish before the demo
 - **`App/led_strip.h`** is the one LED tuning block: `LED_COUNT_DEFAULT` (90), `LED_MASTER_PCT_DEFAULT`
@@ -453,13 +550,22 @@ void HAL_TIM_ErrorCallback(TIM_HandleTypeDef *htim)     { app_on_tim_error(htim)
 - Confirm all slot roles in `App/config.c`: solid (Macro1/2, Gravimetric, Blender1/2, Packaging) and
   liquid (LMacro1/2, Vessel1/2, Bottling). The liquid line is mapped but unused until its own sequence
   lands.
-- **Animation pace** — `SS1_CHARGE_STEP_MS` (400) and `SS1_FLOW_STEP_MS` (700) in `Core/Inc/config.h`
-  set the tempo of the whole demo. Slower is better than faster; `600` / `1000` for a slower run,
-  `250` / `450` for a faster one. Nothing else needs touching.
-- **Fixed durations** — the five 10 s windows (`SS1_INITIAL_PROCESS_MS`, `SS1_COLLECTION_MS`,
-  `SS1_DUMP_MS`) are pinned by the requirement and must not be shortened. They account for 80 s of each
-  cycle. If the demo needs to be shorter, drop `SS1_FLOW_OUTPUT_PASSES` to 1 and
-  `SS1_PACKAGING_FINISH_MS` to 2000 first.
-- **Inferred windows** the requirement leaves open, tune freely: `SS1_BLEND_RUN_MS` (10 s of blender
-  running between "both materials in" and "ready to ship" — without it that blue frame would never be
-  seen), `SS1_PACKAGING_FINISH_MS`, `SS1_GRAV_READY_AT_MS`, `SS1_CYCLE_GAP_MS`.
+- **Animation pace** — `SS1_CHARGE_FILL_MACRO_MS` (420), `SS1_CHARGE_FILL_GRAV_MS` (340) and
+  `SS1_FLOW_STEP_MS` (700) in `Core/Inc/config.h` set the tempo. `600` / `480` / `1000` for a slower
+  run, `320` / `260` / `450` for a faster one. Keep the gravimetric value below the macro one, and
+  its total above — two `_Static_assert`s enforce both, so a bad pair fails the build rather than
+  the demo.
+- **Run length** — `SS1_CYCLES` (4) is the only lever on total runtime, and nothing else depends on
+  it. A cycle is one lot and lots ship 123 s apart, so the run is `182 + 123 x (SS1_CYCLES - 1)`
+  seconds: four cycles is ~9 min 11 s, two is ~5 min 5 s, eight is ~19 min.
+- **Fixed durations** — the 20 s windows (`SS1_INITIAL_PROCESS_MS`, `SS1_COLLECTION_MS`,
+  `SS1_DUMP_MS`) are pinned by the requirement and must not be shortened; `SS1_BLEND_RUN_MS` and
+  `SS1_PACKAGING_FINISH_MS` were trimmed to 12 s by change 11.3 and may be retuned. Note that
+  `SS1_COLLECTION_MS` and `SS1_DUMP_MS` are **also** the arm's dwell phases: shortening them here
+  without shortening `RobotPhase.COLLECTING` / `DUMPING` in the Android app breaks the build, by
+  design.
+- **Inferred windows** the requirement leaves open, tune freely: `SS1_ARM_HOME_HOLD_MS` (the rest at
+  rail centre between carries — this is the slack that keeps two arm animations from overlapping, so
+  do not take it to zero), `SS1_CHARGE_BLANK_MS` and `SS1_CHARGE_REPEATS`. `SS1_GRAV_READY_AT_MS`
+  and `SS1_CYCLE_GAP_MS` are both gone: the gravimetric is released by the macro's pour rather than
+  by a clock (13.1), and there is no gap between cycles left to time (13.2).

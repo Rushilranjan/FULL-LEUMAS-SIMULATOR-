@@ -99,8 +99,24 @@
  * 34 / 82 (354ns / 854ns) is centred in BOTH datasheets, worst-case margin
  * 54ns instead of 33ns, and is what this driver uses. Keep it that way unless
  * you have a scope on the line. */
+/* LED_TIM_HZ is the TIM1 counter clock. TIM1 is on APB2 with the prescaler at
+ * /1, so it runs at HCLK: SystemClock_Config() gives HSE 8 MHz -> PLLM 4 ->
+ * PLLN 96 -> PLLP 2 = SYSCLK 96 MHz, AHB /1 = HCLK 96 MHz. (192 MHz is the VCO
+ * output, NOT the system clock — an easy and expensive thing to misread.)
+ *
+ * LED_TIM_ARR is written out rather than derived, and must equal the Counter
+ * Period CubeMX programs into TIM1 in main.c. Deriving it from LED_TIM_HZ made
+ * the bit-rate assertion in led_strip.c tautological: it recomputed the same
+ * number it was checking and could never fail. Spelled out, the two now
+ * disagree if the clock tree moves, and the build stops.
+ *
+ * What NO compile-time check can catch is LED_TIM_HZ disagreeing with the
+ * actual silicon — SystemClock_Config()'s values are not constant expressions.
+ * If you change the clock tree, change this line by hand. Getting it wrong by
+ * 2x is not subtle: the strip shows garbage, because every WS2812B bit is
+ * half-width. */
 #define LED_TIM_HZ            96000000u
-#define LED_TIM_ARR           ((LED_TIM_HZ / 800000u) - 1u)   /* 119, 1.25us  */
+#define LED_TIM_ARR           119u                            /* 1.25us bit   */
 #define LED_DUTY_0            34u                             /* T0H ~354 ns  */
 #define LED_DUTY_1            82u                             /* T1H ~854 ns  */
 

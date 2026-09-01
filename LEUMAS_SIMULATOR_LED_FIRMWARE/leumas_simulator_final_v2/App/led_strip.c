@@ -23,8 +23,12 @@
  *     T0H  250..450 ns     T0L  750..1000 ns
  *     T1H  750..950 ns     T1L  300..450  ns
  * See the timing note in led_strip.h for where those numbers come from. */
-_Static_assert((LED_TIM_HZ / (LED_TIM_ARR + 1u)) == 800000u,
-               "WS2812B needs an 800 kHz bit rate: fix LED_TIM_HZ / LED_TIM_ARR");
+/* A real cross-check now that LED_TIM_ARR is a literal rather than a value
+ * derived from LED_TIM_HZ: change the clock tree and forget the timer period
+ * (or the reverse) and this stops the build. It cannot tell you that
+ * LED_TIM_HZ itself is wrong — see the note in led_strip.h. */
+_Static_assert(LED_TIM_HZ == (LED_TIM_ARR + 1u) * 800000u,
+               "WS2812B needs an 800 kHz bit rate: LED_TIM_HZ and LED_TIM_ARR disagree");
 _Static_assert(LED_NS(LED_DUTY_0) >= 250u && LED_NS(LED_DUTY_0) <= 450u,
                "T0H must suit BOTH WS2812B and WS2812B-V5 (250..450 ns)");
 _Static_assert(LED_NS(LED_DUTY_1) >= 750u && LED_NS(LED_DUTY_1) <= 950u,

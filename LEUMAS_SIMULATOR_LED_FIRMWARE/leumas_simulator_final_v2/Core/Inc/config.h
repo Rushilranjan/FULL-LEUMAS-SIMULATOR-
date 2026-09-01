@@ -112,60 +112,127 @@ extern const SlotLeds SLOT_LEDS[MODULE_COUNT];
 #define SS1_CYCLES             4u
 
 /* ---- FIXED process durations. The requirement pins these; do not shorten. --
- *
- * Change 15.2: COLLECTION and DUMP raised 10000 -> 20000 each, so one carry
- * (collect + dump, the window a single MOVE cue covers) is 40 s rather than
- * 20 s. The Android arm animates a three-coordinate reach - transit, approach,
- * target - coming fully to rest at the via point, which does not read as slow
- * and graceful in 20 s. Timings.DEFAULT_ROBOT_ANIMATION_MS is 40 s and this is
- * its firmware-side account of the same carry; the two must move together.
- * Lengthening only loosens both _Static_asserts in solid_seq1.c.
- *
- * DUMP carries 2 s more than COLLECTION so the carry is 42 s against a 40 s
- * animation. That 2 s is the jitter margin change 12.2 introduced: the app
- * animates one MOVE for the full carry, so with the two exactly equal the
- * next cue can land a render-tick before the arm reaches home, which queues a
- * transfer and triggers the catch-up speed-up mid-rotation. The slack has to
- * sit on this side because the animation length is fixed by requirement 15.2. */
-#define SS1_INITIAL_PROCESS_MS   10000u  /* Module 2 + 3 both running at start */
+ * All 20 s: a module holds each of its states long enough to be read from
+ * across a room. */
+#define SS1_INITIAL_PROCESS_MS   20000u  /* Module 2 + 3 both running at start */
 #define SS1_COLLECTION_MS        20000u  /* robot collecting from a module     */
-#define SS1_DUMP_MS              22000u  /* robot dumping into the blender     */
+#define SS1_DUMP_MS              20000u  /* robot dumping into the blender     */
 
-/* ---- Windows the requirement leaves open. Tune freely. ------------------- */
-/* How far into the macro -> blender dump the gravimetric finishes and goes
- * GREEN. Must be < SS1_DUMP_MS (asserted in solid_seq1.c). Scaled with the
- * 15.2 dump change (5000 -> 10000) to hold it at the dump midpoint, so the
- * green lands at the same place in the rhythm as before. */
-#define SS1_GRAV_READY_AT_MS     10000u
+/* ---- Robot arm mirror ----------------------------------------------------
+ * The BLE link is transmit-only: no ARRIVED comes back, so the firmware cannot
+ * ask the Android app where the arm is. The only way the board and the arm can
+ * agree is for BOTH to be driven from these numbers.
+ *
+ * Each constant below is one phase of RobotPhase in
+ *   LEUMAS_SIMULATOR_ROBOT/.../domain/RobotStateMachine.kt
+ * in the same order. COLLECTING and DUMPING are SS1_COLLECTION_MS and
+ * SS1_DUMP_MS above — the arm physically stands at the module for those, which
+ * is the whole point: every module colour change below fires while the arm is
+ * visibly in the right place.
+ *
+ * Change one of these and you MUST change RobotPhase to match. The total is
+ * asserted in solid_seq1.c so a one-sided edit fails the build. */
+#define SS1_ARM_TO_SOURCE_MS      3150u  /* MOVING_TO_SOURCE                   */
+#define SS1_ARM_POS_SOURCE_MS     1300u  /* POSITIONING_AT_SOURCE              */
+#define SS1_ARM_PICK_MS           1850u  /* PICKING — gripper closes           */
+                                         /* COLLECTING = SS1_COLLECTION_MS     */
+#define SS1_ARM_LIFT_MS           1100u  /* LIFTING                            */
+#define SS1_ARM_TO_DEST_MS        3700u  /* MOVING_TO_DESTINATION              */
+#define SS1_ARM_POS_DEST_MS       1100u  /* POSITIONING_AT_DESTINATION         */
+#define SS1_ARM_PLACE_MS          1850u  /* PLACING — gripper opens            */
+                                         /* DUMPING = SS1_DUMP_MS              */
+#define SS1_ARM_RETRACT_MS        1500u  /* RETRACTING                         */
+#define SS1_ARM_RETURN_MS         2950u  /* RETURNING_HOME                     */
+
+/* A visible rest at rail centre before the next carry is cued. Also the slack
+ * that absorbs UART and render-tick jitter, so two carries can never overlap
+ * and trip the app's catch-up speed-up. */
+#define SS1_ARM_HOME_HOLD_MS      3000u
+
+/* Milestones along a carry, as offsets from the MOVE cue. Derived — do not
+ * hand-edit; change the phases above instead. */
+#define SS1_ARM_COLLECT_END_MS  ( SS1_ARM_TO_SOURCE_MS + SS1_ARM_POS_SOURCE_MS  \
+                                + SS1_ARM_PICK_MS + SS1_COLLECTION_MS )   /* 26300 */
+#define SS1_ARM_AT_DEST_MS      ( SS1_ARM_COLLECT_END_MS + SS1_ARM_LIFT_MS      \
+                                + SS1_ARM_TO_DEST_MS )                    /* 31100 */
+#define SS1_ARM_DUMP_END_MS     ( SS1_ARM_AT_DEST_MS + SS1_ARM_POS_DEST_MS      \
+                                + SS1_ARM_PLACE_MS + SS1_DUMP_MS )        /* 54050 */
+#define SS1_ARM_TOTAL_MS        ( SS1_ARM_DUMP_END_MS + SS1_ARM_RETRACT_MS      \
+                                + SS1_ARM_RETURN_MS )                     /* 58500 */
+
+/* ---- Windows the requirement leaves open. Tune freely. -------------------
+ *
+ * SS1_GRAV_READY_AT_MS used to live here: the gravimetric was forced green part
+ * way through the macro's dump, on a clock of its own, purely so it would be
+ * ready when the arm came for it. Change 12.1 removed the need — each feeder
+ * now recharges and produces on its own timer the moment the arm empties it, so
+ * "ready" is something the module arrives at rather than something the chain
+ * declares on its behalf. */
 /* How long the blender runs between "both materials in" (BLUE) and "ready to
  * ship to packaging" (GREEN). Without a real window here the blender BLUE would
- * be drawn and overwritten in the same frame and nobody would ever see it. */
-#define SS1_BLEND_RUN_MS         10000u
-/* How long packaging takes to finish after the last material reaches it. */
-#define SS1_PACKAGING_FINISH_MS   5000u
-/* Blank board between cycles, so the reset is something the audience watches
- * happen rather than a jump cut. */
-#define SS1_CYCLE_GAP_MS          2000u
+ * be drawn and overwritten in the same frame and nobody would ever see it.
+ * Also the window the gravimetric recharge has to finish in.
+ *
+ * Change 11.3: was 20 s. These two are the only stretches of the cycle with no
+ * robot in them, so they were where the demo sagged — the arm parks at rail
+ * centre and the audience waits on a colour change. Shortened to 12 s, which
+ * still reads clearly from across a room but stops the board-only phases
+ * dominating the cycle. */
+#define SS1_BLEND_RUN_MS         12000u
+/* How long packaging takes to finish after the last material reaches it.
+ * Change 11.3: was 20 s, same reasoning as the blender above. */
+#define SS1_PACKAGING_FINISH_MS  12000u
+/* SS1_CYCLE_GAP_MS used to live here: a blank board between cycles, so the
+ * reset was something the audience watched happen. Change 13.2 removed the
+ * reset itself — a cycle boundary is now just a lot shipping while the arm
+ * is already carrying the next cycle's material — so there is no gap left
+ * to time. */
 
 /* ---- Animation pace ------------------------------------------------------
  * These are for a client-facing demo watched from 2-3 m away, NOT for an
  * Arduino LED chase. Slow beats fast every time: the audience must be able to
  * follow the direction material is moving.
  *
- * To retune the whole demo, change the two STEP_MS values and nothing else:
- *   SLOWER   CHARGE_STEP 600, FLOW_STEP 1000
- *   NORMAL   CHARGE_STEP 400, FLOW_STEP  700   <- as shipped
- *   FASTER   CHARGE_STEP 250, FLOW_STEP  450
+ * To retune the whole demo, change the three STEP/FILL values and nothing else:
+ *   SLOWER   FILL_MACRO 700, FILL_GRAV 450, FLOW_STEP 1000
+ *   NORMAL   FILL_MACRO 420, FILL_GRAV 300, FLOW_STEP  700   <- as shipped
+ *   FASTER   FILL_MACRO 300, FILL_GRAV 210, FLOW_STEP  450
  * Every duration below is read in exactly one place, so there are no magic
  * numbers anywhere in the animation code. */
 
-/* Recharge (Macro 0..5, Gravimetric 0..9): a head crawls from the first
- * uncharged pixel to the end of the span, then the next chunk latches solid
- * behind it and the following pass starts further along. */
-#define SS1_CHARGE_STEP_MS         400u  /* dwell on each pixel as the head moves */
-#define SS1_CHARGE_STAGE_MS       1500u  /* pause after a chunk latches solid     */
-#define SS1_CHARGE_CHUNK             2u  /* pixels that go solid per stage        */
-#define SS1_CHARGE_HOLD_MS        1000u  /* hold once the whole span is solid     */
+/* Recharge (Macro 0..5, Gravimetric 0..9). Change 11.2: ONE stage, not two.
+ *
+ *   pixels latch on one at a time from the base of the span to its end, each
+ *   staying lit — 1 solid, 2 solid, 3 solid ... — then the whole span blanks
+ *   and the pass starts again. SS1_CHARGE_REPEATS passes in all.
+ *
+ * The old "first pixel / up to the middle / all of them" block stage is gone.
+ * It read as a stutter rather than as a level filling up, and on the 10-pixel
+ * gravimetric span the middle block landed in a different place than it did on
+ * the macro's 6, so the two recharges did not look like the same animation.
+ *
+ * Then the span goes DARK and stays dark: a recharged module is signalled by
+ * its own LED going blue, not by leaving strip pixels lit.
+ *
+ * The gravimetric span is 10 pixels against the macro's 6, so it fills at a
+ * faster per-pixel rate — otherwise it would drag — while still taking
+ * slightly longer overall. Both facts are asserted in solid_seq1.c. */
+#define SS1_CHARGE_FILL_MACRO_MS   420u  /* per pixel, 6-pixel span           */
+/* Change 12.3: eased off from 300 — the gravimetric was reading as a flicker
+ * over ten pixels. Still quicker per pixel than the macro, and still the longer
+ * animation overall, both of which solid_seq1.c asserts. */
+#define SS1_CHARGE_FILL_GRAV_MS    340u  /* per pixel, 10-pixel span          */
+#define SS1_CHARGE_BLANK_MS        500u  /* dark gap between passes           */
+#define SS1_CHARGE_REPEATS           3u  /* how many times the fill repeats   */
+
+/* Total run time of one recharge, in ms. Used by the build-time assertions
+ * that keep each recharge inside the window it has to finish in.
+ *
+ * Every pass costs len*step; the blank sits BETWEEN passes, so there are
+ * REPEATS-1 of them and the animation ends on the blank that clears the span. */
+#define SS1_CHARGE_MS(len, step)                                              \
+    ( SS1_CHARGE_REPEATS * (len) * (step)                                     \
+      + (SS1_CHARGE_REPEATS - 1u) * SS1_CHARGE_BLANK_MS )
 
 /* Material flow (Blender -> Packaging 14..16, Packaging -> output 17..21): the
  * span fills one pixel at a time, holds, blanks, and repeats. */
