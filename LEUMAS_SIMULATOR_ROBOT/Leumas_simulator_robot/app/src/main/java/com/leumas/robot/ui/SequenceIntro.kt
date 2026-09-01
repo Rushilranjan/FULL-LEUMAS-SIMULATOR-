@@ -308,11 +308,16 @@ private fun RecipeCard(recipe: Recipe, modifier: Modifier = Modifier) {
                 textAlign = TextAlign.Center,
             )
 
-            // The modules this sequence uses, in flow order, small.
+            // The PROCESS, stage by stage -- not the slot list.
+            //
+            // Change 20.3: this used to join activeSlots with arrows, which happens to read
+            // correctly for sequence 1 because its four modules really do form a chain. Sequence 2
+            // is two blend lines running in parallel, and the slot list rendered it as
+            // "MACRO 1 -> MACRO 2 -> GRAVIMETRIC -> BLENDER 1 -> BLENDER 2" -- implying macro 1
+            // feeds macro 2 and blender 1 feeds blender 2, neither of which happens. [Recipe.chain]
+            // groups the concurrent modules into one stage, which is what it was written for.
             Text(
-                text = recipe.activeSlots.joinToString("  →  ") {
-                    SlotMap.displayName(it).uppercase()
-                },
+                text = recipe.chain,
                 color = LeumasColors.OnSurfaceDim,
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace,
