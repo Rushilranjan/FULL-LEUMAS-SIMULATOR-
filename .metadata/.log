@@ -1,0 +1,25 @@
+!SESSION 2026-08-31 19:36:17.630 -----------------------------------------------
+eclipse.buildId=Version 2.2.0
+java.version=21.0.10
+java.vendor=Eclipse Adoptium
+BootLoader constants: OS=win32, ARCH=x86_64, WS=win32, NL=en_IN
+Command-line arguments:  -os win32 -ws win32 -arch x86_64
+
+!ENTRY com.st.stm32cube.ide.mcu.informationcenter 1 1 2026-08-31 19:36:45.552
+!MESSAGE Log4j2 initialized with config file C:\Users\AI Firmware\OneDrive\Desktop\LEUMAS_FULL\.metadata\.log4j2.xml
+
+!ENTRY com.st.stm32cube.ide.mcu.ide 1 1 2026-08-31 19:36:53.591
+!MESSAGE Started RMI Server, listening on port 41337
+
+!ENTRY org.eclipse.core.jobs 2 2 2026-08-31 19:36:55.031
+!MESSAGE Job found still running after platform shutdown.  Jobs should be canceled by the plugin that scheduled them during shutdown: com.st.stm32cube.ide.mcu.ide.startup.ProductDbLoad$1 RUNNING
+	 at java.xml/com.sun.org.apache.xerces.internal.dom.DeepNodeListImpl.nextMatchingElementAfter(DeepNodeListImpl.java:195)
+	 at java.xml/com.sun.org.apache.xerces.internal.dom.DeepNodeListImpl.item(DeepNodeListImpl.java:146)
+	 at java.xml/com.sun.org.apache.xerces.internal.dom.DeepNodeListImpl.getLength(DeepNodeListImpl.java:116)
+	 at com.st.stm32cube.ide.mcu.productdb.core.TargetsDefinitionFileParser.getMcus(TargetsDefinitionFileParser.java:402)
+	 at com.st.stm32cube.ide.mcu.productdb.core.TargetsDefinitionFileParser.parse(TargetsDefinitionFileParser.java:113)
+	 at com.st.stm32cube.ide.mcu.productdb.MCUProductDbResources.loadSupportedTargets(MCUProductDbResources.java:151)
+	 at com.st.stm32cube.ide.mcu.productdb.MCUProductDbResources.<init>(MCUProductDbResources.java:68)
+	 at com.st.stm32cube.ide.mcu.productdb.MCUProductDbResources.getInstance(MCUProductDbResources.java:80)
+	 at com.st.stm32cube.ide.mcu.ide.startup.ProductDbLoad$1.run(ProductDbLoad.java:31)
+	 at org.eclipse.core.internal.jobs.Worker.run(Worker.java:63)

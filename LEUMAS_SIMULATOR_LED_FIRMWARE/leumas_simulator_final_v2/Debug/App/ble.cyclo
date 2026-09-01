@@ -1,0 +1,8 @@
+../App/ble.c:7:6:ble_init	1
+../App/ble.c:12:13:ble_send	2
+../App/ble.c:19:6:ble_ready	1
+../App/ble.c:21:6:ble_seq	1
+../App/ble.c:28:6:ble_run	1
+../App/ble.c:35:6:ble_done	1
+../App/ble.c:42:6:ble_move	1
+../App/ble.c:49:6:ble_lot_done	1

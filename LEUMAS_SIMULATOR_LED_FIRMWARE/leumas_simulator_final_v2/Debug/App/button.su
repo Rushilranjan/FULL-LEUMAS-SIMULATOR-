@@ -1,0 +1,3 @@
+../App/button.c:24:6:button_init	4	static
+../App/button.c:30:6:button_on_exti	24	static
+../App/button.c:42:6:button_poll	4	static

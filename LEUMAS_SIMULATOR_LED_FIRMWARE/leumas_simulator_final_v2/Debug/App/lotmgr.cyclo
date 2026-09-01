@@ -1,0 +1,13 @@
+../App/lotmgr.c:72:23:slot1	1
+../App/lotmgr.c:77:13:alloc_stage	4
+../App/lotmgr.c:98:12:stage_using	4
+../App/lotmgr.c:114:13:type_needed_again	7
+../App/lotmgr.c:129:13:is_last_lot	5
+../App/lotmgr.c:146:13:mid_ship_final	3
+../App/lotmgr.c:157:12:next_downstream_mid	9
+../App/lotmgr.c:174:13:start_trip	4
+../App/lotmgr.c:199:13:try_inject	9
+../App/lotmgr.c:244:13:lot_tick	28
+../App/lotmgr.c:384:6:lotmgr_start	10
+../App/lotmgr.c:450:6:lotmgr_tick	8
+../App/lotmgr.c:472:6:lotmgr_running	4
