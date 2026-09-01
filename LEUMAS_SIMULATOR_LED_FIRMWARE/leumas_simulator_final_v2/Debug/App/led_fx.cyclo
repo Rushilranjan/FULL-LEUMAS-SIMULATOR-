@@ -1,0 +1,14 @@
+../App/led_fx.c:31:13:draw	4
+../App/led_fx.c:48:6:led_fx_init	1
+../App/led_fx.c:59:6:led_fx_blink_restart	1
+../App/led_fx.c:66:6:led_fx_swipe	6
+../App/led_fx.c:90:6:led_fx_stop	2
+../App/led_fx.c:100:13:blink_tick	3
+../App/led_fx.c:113:6:led_fx_tick	6
+../App/led_fx.c:143:6:led_fx_active	1
+../App/led_fx.c:145:6:led_fx_set_tail	2
+../App/led_fx.c:153:10:led_fx_get_tail	1
+../App/led_fx.c:155:6:led_fx_set_step_ms	4
+../App/led_fx.c:167:10:led_fx_get_step_ms	1
+../App/led_fx.c:169:6:led_fx_set_blink_ms	3
+../App/led_fx.c:177:10:led_fx_get_blink_ms	1

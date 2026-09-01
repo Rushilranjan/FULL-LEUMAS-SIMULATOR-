@@ -1,0 +1,5 @@
+../App/app.c:13:6:app_init	24	static
+../App/app.c:29:6:app_tick	16	static
+../App/app.c:51:6:app_on_button_exti	16	static
+../App/app.c:56:6:app_on_pwm_complete	16	static
+../App/app.c:61:6:app_on_tim_error	16	static

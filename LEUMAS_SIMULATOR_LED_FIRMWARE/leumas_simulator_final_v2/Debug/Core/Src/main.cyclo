@@ -1,0 +1,15 @@
+../Core/Src/main.c:103:5:main	1
+../Core/Src/main.c:178:6:SystemClock_Config	4
+../Core/Src/main.c:236:13:MX_ETH_Init	2
+../Core/Src/main.c:285:13:MX_TIM1_Init	7
+../Core/Src/main.c:365:13:MX_TIM3_Init	6
+../Core/Src/main.c:424:13:MX_USART3_UART_Init	2
+../Core/Src/main.c:459:13:MX_USART6_UART_Init	2
+../Core/Src/main.c:494:13:MX_USB_OTG_FS_PCD_Init	2
+../Core/Src/main.c:527:13:MX_DMA_Init	1
+../Core/Src/main.c:549:13:MX_GPIO_Init	1
+../Core/Src/main.c:608:6:HAL_GPIO_EXTI_Callback	1
+../Core/Src/main.c:614:6:HAL_TIM_PWM_PulseFinishedCallback	1
+../Core/Src/main.c:621:6:HAL_TIM_ErrorCallback	1
+../Core/Src/main.c:630:6:MPU_Config	1
+../Core/Src/main.c:661:6:Error_Handler	1
