@@ -636,8 +636,10 @@ static void exec(char *line)
     } else if (strcmp(cmd, "ble") == 0) {
         /* Did anything the app sent actually get here? See ble.h. */
         char bb[96];
-        snprintf(bb, sizeof(bb), "BLE rx: %lu bytes, last line: \"%s\"\r\n",
-                 (unsigned long)ble_rx_bytes(), ble_rx_last());
+        snprintf(bb, sizeof(bb),
+                 "BLE rx: %lu bytes, %lu dropped, last line: \"%s\"\r\n",
+                 (unsigned long)ble_rx_bytes(), (unsigned long)ble_rx_dropped(),
+                 ble_rx_last());
         out(bb);
     } else if (strcmp(cmd, "stop") == 0) {
         /* The one command that makes everything hold still — including a

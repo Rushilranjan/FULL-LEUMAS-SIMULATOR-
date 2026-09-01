@@ -73,31 +73,49 @@ fun WaitingEdgeGlow(modifier: Modifier = Modifier) {
         ),
         label = "waitCounter",
     )
-    // The breath. Kept shallow -- it should read as alive, not as a warning light.
+    // The surge. Change 17.2 shortened it from 2.6 s and deepened it: at the old pace and depth
+    // it was a slow tint nobody noticed. This is a pulse -- still smooth, but it clearly arrives.
     val breath by transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(2_600, easing = LinearEasing),
+            animation = tween(1_500, easing = LinearEasing),
             repeatMode = RepeatMode.Reverse,
         ),
         label = "waitBreath",
     )
 
-    val level = 0.72f + 0.28f * breath
+    // Change 17.2: the first version was too polite to read as "something is waiting to happen"
+    // -- on the device it looked like a static tint. Three things fix that, and none of them is
+    // just "more alpha": the breath swings much wider so the whole border visibly surges, the
+    // stroke breathes with it so the band *bulges* rather than only brightening, and a third
+    // wide, faint pass throws the surge further into the screen so it reads from across a room.
+    val level = 0.45f + 0.55f * breath
+
+    // The bulge. The band grows about a third at the peak of each surge, which is what turns a
+    // brightness change into movement -- the edge of the glow travels inward and back.
+    val swell = 1f + 0.34f * breath
 
     Box(modifier.fillMaxSize()) {
-        GreenGlowPass(
-            phase = phase,
-            blur = shortEdge * 0.020f,
-            stroke = shortEdge * 0.042f,
-            alpha = 0.50f * level,
-        )
+        // Outer bloom: wide and soft, carries the surge away from the edge.
         GreenGlowPass(
             phase = counter,
-            blur = shortEdge * 0.005f,
-            stroke = shortEdge * 0.013f,
-            alpha = 0.85f * level,
+            blur = shortEdge * 0.045f,
+            stroke = shortEdge * 0.070f * swell,
+            alpha = 0.42f * level,
+        )
+        GreenGlowPass(
+            phase = phase,
+            blur = shortEdge * 0.018f,
+            stroke = shortEdge * 0.044f * swell,
+            alpha = 0.78f * level,
+        )
+        // Bright core, hugging the border so the outline itself stays crisp.
+        GreenGlowPass(
+            phase = counter,
+            blur = shortEdge * 0.004f,
+            stroke = shortEdge * 0.014f,
+            alpha = 1.0f * level,
         )
     }
 }

@@ -115,8 +115,15 @@ extern const SlotLeds SLOT_LEDS[MODULE_COUNT];
  * All 20 s: a module holds each of its states long enough to be read from
  * across a room. */
 #define SS1_INITIAL_PROCESS_MS   20000u  /* Module 2 + 3 both running at start */
-#define SS1_COLLECTION_MS        20000u  /* robot collecting from a module     */
-#define SS1_DUMP_MS              20000u  /* robot dumping into the blender     */
+/* Change 17.6: SS1_COLLECTION_MS and SS1_DUMP_MS are gone. They described a
+ * standing dwell the arm no longer has -- this branch's app folds collecting
+ * into PICKING and pouring into PLACING, so adding them on top of the phase
+ * table double-counted and produced the 58.5 s arm the app never animated.
+ *
+ * The dwell is now SS1_ARM_PICK_MS / SS1_ARM_PLACE_MS, 7.4 s each. If the demo
+ * wants the old 20 s stand-and-collect back, it has to be lengthened in the
+ * app's RobotPhase fractions first and mirrored here -- doing it on the board
+ * alone is exactly what put the two out of step. */
 
 /* ---- Robot arm mirror ----------------------------------------------------
  * The BLE link is transmit-only: no ARRIVED comes back, so the firmware cannot
@@ -132,31 +139,56 @@ extern const SlotLeds SLOT_LEDS[MODULE_COUNT];
  *
  * Change one of these and you MUST change RobotPhase to match. The total is
  * asserted in solid_seq1.c so a one-sided edit fails the build. */
-#define SS1_ARM_TO_SOURCE_MS      3150u  /* MOVING_TO_SOURCE                   */
-#define SS1_ARM_POS_SOURCE_MS     1300u  /* POSITIONING_AT_SOURCE              */
-#define SS1_ARM_PICK_MS           1850u  /* PICKING — gripper closes           */
-                                         /* COLLECTING = SS1_COLLECTION_MS     */
-#define SS1_ARM_LIFT_MS           1100u  /* LIFTING                            */
-#define SS1_ARM_TO_DEST_MS        3700u  /* MOVING_TO_DESTINATION              */
-#define SS1_ARM_POS_DEST_MS       1100u  /* POSITIONING_AT_DESTINATION         */
-#define SS1_ARM_PLACE_MS          1850u  /* PLACING — gripper opens            */
-                                         /* DUMPING = SS1_DUMP_MS              */
-#define SS1_ARM_RETRACT_MS        1500u  /* RETRACTING                         */
-#define SS1_ARM_RETURN_MS         2950u  /* RETURNING_HOME                     */
+/* Change 17.6 -- RE-DERIVED FROM THE APP'S PHASE TABLE, WHICH IS 40 s.
+ *
+ * These used to describe a 58.5 s arm with explicit 20 s COLLECTING and DUMPING
+ * dwells. The Android app on this branch does not have that model: its
+ * RobotPhase is a fraction table over DEFAULT_ROBOT_ANIMATION_MS = 40 s, with
+ * the collect dwell folded into PICKING and the pour into PLACING. The two
+ * halves were therefore 20.5 s apart on every carry -- the board cued the next
+ * MOVE at 61.5 s while the arm had finished animating at 40 s, so it stood
+ * still for a third of every trip. That, not SS1_ARM_HOME_HOLD_MS, is why the
+ * robot looked idle.
+ *
+ * Each value below is the app's fraction times 40 s, in the app's order:
+ *
+ *     MOVING_TO_SOURCE            0.095
+ *     POSITIONING_AT_SOURCE       0.065
+ *     PICKING                     0.185   <- the collect dwell lives here
+ *     LIFTING                     0.090
+ *     MOVING_TO_DESTINATION       0.105
+ *     POSITIONING_AT_DESTINATION  0.065
+ *     PLACING                     0.185   <- the pour dwell lives here
+ *     RETRACTING                  0.110
+ *     RETURNING_HOME              0.100
+ *
+ * Change a fraction or the 40 s in RobotStateMachine.kt and these must move
+ * with it; the assert on SS1_ARM_TOTAL_MS in solid_seq1.c is the tripwire. */
+#define SS1_ARM_TO_SOURCE_MS      3800u  /* MOVING_TO_SOURCE            0.095  */
+#define SS1_ARM_POS_SOURCE_MS     2600u  /* POSITIONING_AT_SOURCE       0.065  */
+#define SS1_ARM_PICK_MS           7400u  /* PICKING — grip and collect  0.185  */
+#define SS1_ARM_LIFT_MS           3600u  /* LIFTING                     0.090  */
+#define SS1_ARM_TO_DEST_MS        4200u  /* MOVING_TO_DESTINATION       0.105  */
+#define SS1_ARM_POS_DEST_MS       2600u  /* POSITIONING_AT_DESTINATION  0.065  */
+#define SS1_ARM_PLACE_MS          7400u  /* PLACING — release and pour  0.185  */
+#define SS1_ARM_RETRACT_MS        4400u  /* RETRACTING                  0.110  */
+#define SS1_ARM_RETURN_MS         4000u  /* RETURNING_HOME              0.100  */
 
 /* A visible rest at rail centre before the next carry is cued. Also the slack
  * that absorbs UART and render-tick jitter, so two carries can never overlap
  * and trip the app's catch-up speed-up. */
-#define SS1_ARM_HOME_HOLD_MS      3000u
+#define SS1_ARM_HOME_HOLD_MS      2000u
 
 /* Milestones along a carry, as offsets from the MOVE cue. Derived — do not
  * hand-edit; change the phases above instead. */
+/* Change 17.6: the dwells are no longer added on top -- PICKING and PLACING
+ * ARE the dwells, because that is how the app animates them. */
 #define SS1_ARM_COLLECT_END_MS  ( SS1_ARM_TO_SOURCE_MS + SS1_ARM_POS_SOURCE_MS  \
-                                + SS1_ARM_PICK_MS + SS1_COLLECTION_MS )   /* 26300 */
+                                + SS1_ARM_PICK_MS )                       /* 13800 */
 #define SS1_ARM_AT_DEST_MS      ( SS1_ARM_COLLECT_END_MS + SS1_ARM_LIFT_MS      \
-                                + SS1_ARM_TO_DEST_MS )                    /* 31100 */
+                                + SS1_ARM_TO_DEST_MS )                    /* 21600 */
 #define SS1_ARM_DUMP_END_MS     ( SS1_ARM_AT_DEST_MS + SS1_ARM_POS_DEST_MS      \
-                                + SS1_ARM_PLACE_MS + SS1_DUMP_MS )        /* 54050 */
+                                + SS1_ARM_PLACE_MS )                      /* 31600 */
 #define SS1_ARM_TOTAL_MS        ( SS1_ARM_DUMP_END_MS + SS1_ARM_RETRACT_MS      \
                                 + SS1_ARM_RETURN_MS )                     /* 58500 */
 
@@ -183,7 +215,7 @@ extern const SlotLeds SLOT_LEDS[MODULE_COUNT];
  * time it spends blue -- it is no longer a window the audience waits through,
  * it IS the blend. Short and purposeful: blue, then green, then the 14..16 flow
  * starts on the same pass with nothing in between. */
-#define SS1_BLEND_RUN_MS          5000u
+#define SS1_BLEND_RUN_MS          8000u
 /* How long packaging takes to finish after the last material reaches it.
  * Change 11.3: was 20 s, same reasoning as the blender above. */
 #define SS1_PACKAGING_FINISH_MS  12000u
@@ -243,8 +275,31 @@ extern const SlotLeds SLOT_LEDS[MODULE_COUNT];
  * span fills one pixel at a time, holds, blanks, and repeats. */
 #define SS1_FLOW_STEP_MS           700u  /* dwell per pixel added, and the full-span hold */
 #define SS1_FLOW_BLANK_MS         1200u  /* all-dark gap before the next pass             */
-#define SS1_FLOW_XFER_PASSES         4u  /* blender -> packaging repeats (fixed by spec)  */
-#define SS1_FLOW_OUTPUT_PASSES       2u  /* packaging -> output repeats                   */
+#define SS1_FLOW_XFER_PASSES         3u  /* blender -> packaging repeats (change 17.7)    */
+#define SS1_FLOW_OUTPUT_PASSES       3u  /* packaging -> output repeats  (change 17.7)    */
+
+/* Change 17.3: how far AHEAD of the arm's collect-end milestone the source
+ * module goes dark.
+ *
+ * It should go out the instant the robot has taken its material, and on the rig
+ * it was reading late. The cause turned out to be the 20.5 s arm mismatch fixed
+ * in 17.6, not a skew needing trimming: the board was turning the module off at
+ * 26.3 s while the app's arm had finished collecting at 13.8 s. With the two
+ * models reconciled the module goes dark exactly when the arm stops collecting,
+ * so this is 0 and correcting nothing.
+ *
+ * It is kept, at zero, because the two sides remain open-loop clocks with no
+ * handshake and a small standing skew can reappear on different hardware. Raise
+ * it to pull the blackout earlier; it moves the S_CARRY_MOVE / S_CARRY_CROSS
+ * boundary only, so the carry still tiles to exactly SS1_T_CARRY and nothing
+ * downstream shifts. */
+#define SS1_COLLECT_OFF_LEAD_MS      0u
+
+/* Change 17.4: how long a module shows blue to acknowledge material landing in
+ * it, before going dark again to wait for the rest of the batch. Long enough to
+ * read as "that went in", short enough not to become the stale lit module that
+ * change 16.4 removed. */
+#define SS1_RECEIVE_ACK_MS        2000u
 
 /* Emit RUN:/DONE: module cues to the Android robot as well as the four MOVE:
  * cues per cycle. Set to 0 for MOVE-only if the app would rather not see them.

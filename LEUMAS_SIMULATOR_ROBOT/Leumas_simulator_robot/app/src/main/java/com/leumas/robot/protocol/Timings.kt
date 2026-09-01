@@ -49,20 +49,20 @@ object Timings {
      *
      * Derived, not a firmware constant: the flow animator fills LEDs 14..16 one at a time and
      * repeats, so one pass is `span * SS1_FLOW_STEP_MS + SS1_FLOW_BLANK_MS` = 3*700 + 1200 = 3300 ms,
-     * and `SS1_FLOW_XFER_PASSES` is 4. The conveyor band here must last exactly as long or the two
-     * visibly drift apart.
+     * and `SS1_FLOW_XFER_PASSES` is 3 since change 17.7. The conveyor band here must last exactly
+     * as long or the two visibly drift apart.
      */
-    const val TRANSFER_SWIPE_MS = 13_200L
+    const val TRANSFER_SWIPE_MS = 9_900L
 
     /**
      * The final "lot shipped" flow, started by `LOT:DONE`.
      *
      * Derived the same way over the exit span, LEDs 17..21: one pass is 5*700 + 1200 = 4700 ms and
-     * `SS1_FLOW_OUTPUT_PASSES` is 2, so 9400 ms. This was 20 s while the firmware had a dedicated
-     * `EXIT_SWIPE_MS`; the animator that replaced it is less than half that, so the progress
-     * reported by `RobotViewModel.exitSwipeProgress` would otherwise run at half the strip's pace.
+     * `SS1_FLOW_OUTPUT_PASSES` is 3 since change 17.7, so 14100 ms. Both flows repeat three times
+     * now; if either pass count moves in `config.h`, the matching constant here has to move with
+     * it or `RobotViewModel.exitSwipeProgress` runs at the wrong pace against the strip.
      */
-    const val EXIT_SWIPE_MS = 9_400L
+    const val EXIT_SWIPE_MS = 14_100L
 
     /**
      * Default duration of one full robot-transfer animation.

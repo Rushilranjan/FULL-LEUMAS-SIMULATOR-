@@ -216,7 +216,16 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
         }
         // Change 16.7: the board button selected a sequence. Nothing is running and nothing is
         // lit -- show its recipe and offer START. Re-selecting simply replays the intro.
+        //
+        // Change 17.1: it also abandons whatever was in flight. Pressing select is how the
+        // operator restarts the demo, so an arm still swinging through the previous run's carry
+        // and a lot-shipped flourish still playing are both stale the instant it is pressed. The
+        // plant model is wiped by the reducer for the same reason; this is the animation half of
+        // the same reset.
         if (event is McuEvent.RecipeSelected) {
+            machine.abort()
+            poser3d.reset()
+            lotDoneAtMs = 0L
             pendingDemo = null
             armStart(event.sequence)
         }

@@ -48,9 +48,15 @@
  * carry steps need the gaps BETWEEN them, which is all these are. Change a
  * phase in config.h and every step retimes itself. They sum to
  * SS1_ARM_TOTAL_MS + SS1_ARM_HOME_HOLD_MS, asserted below. */
-#define SS1_T_COLLECT_END       ( SS1_ARM_COLLECT_END_MS )                 /* 26300 */
+/* Change 17.3: the source goes dark SS1_COLLECT_OFF_LEAD_MS before the arm's
+ * collect-end milestone, so the two steps below trade that time between them.
+ * Their SUM is untouched, which is what keeps the dump landing exactly on
+ * SS1_ARM_AT_DEST_MS and the whole carry tiling to SS1_T_CARRY. */
+#define SS1_T_COLLECT_END       ( SS1_ARM_COLLECT_END_MS                   \
+                                - SS1_COLLECT_OFF_LEAD_MS )                /* 24300 */
 #define SS1_T_CROSS_TO_DEST     ( SS1_ARM_AT_DEST_MS                       \
-                                - SS1_ARM_COLLECT_END_MS )                 /*  4800 */
+                                - SS1_ARM_COLLECT_END_MS                   \
+                                + SS1_COLLECT_OFF_LEAD_MS )                /*  6800 */
 #define SS1_T_DUMP_HOLD         ( SS1_ARM_DUMP_END_MS                      \
                                 - SS1_ARM_AT_DEST_MS )                     /* 22950 */
 #define SS1_T_GO_HOME           ( SS1_ARM_TOTAL_MS - SS1_ARM_DUMP_END_MS   \
@@ -94,8 +100,8 @@
  * sides. RobotPhase.TOTAL_MS in RobotStateMachine.kt. Editing a phase in
  * config.h without editing the Kotlin (or vice versa) fails the build here
  * rather than drifting silently on the demo table. */
-_Static_assert(SS1_ARM_TOTAL_MS == 58500u,
-               "SS1_ARM_* must sum to RobotPhase.TOTAL_MS in the Android app");
+_Static_assert(SS1_ARM_TOTAL_MS == 40000u,
+               "SS1_ARM_* must sum to Timings.DEFAULT_ROBOT_ANIMATION_MS in the app");
 
 /* The four carry steps must tile the whole carry exactly. If they did not, a
  * module colour would land at the wrong point of the arm animation — which is
@@ -105,8 +111,8 @@ _Static_assert(SS1_T_CARRY == SS1_ARM_TOTAL_MS + SS1_ARM_HOME_HOLD_MS,
 
 /* Timings.TRANSFER_ROBOT_MS in the Android app. The app sizes its catch-up
  * logic on consecutive cues never arriving closer together than this. */
-_Static_assert(SS1_T_CARRY == 61500u,
-               "SS1_T_CARRY must equal Timings.TRANSFER_ROBOT_MS in the app");
+_Static_assert(SS1_T_CARRY == 42000u,
+               "SS1_T_CARRY must equal Timings.CARRY_MS in the Android app");
 
 /* There is ONE recharge animator because the macro's 0..5 is a SUBSET of the
  * gravimetric's 0..9 — the two recharges are physically incapable of playing at
@@ -158,6 +164,17 @@ _Static_assert(SS1_LOT_TAIL_MS < 2u * SS1_T_CARRY,
  * hand off on 14..16, and be gone with time to spare. */
 _Static_assert(SS1_BLEND_RUN_MS + SS1_XFER_FLOW_MS < SS1_T_CARRY,
                "the blender must be empty again before the next material lands");
+
+/* Change 17.4: the first pour's acknowledgement has to finish long before the
+ * second pour arrives, or the blender would still be lit from the wrong thing
+ * when it starts actually blending. */
+_Static_assert(SS1_RECEIVE_ACK_MS < SS1_T_CARRY,
+               "the receive acknowledgement must end before the next material lands");
+
+/* Change 17.3: the lead cannot eat the whole travel-and-grip run-up, or the
+ * source would go dark before the arm had even arrived at it. */
+_Static_assert(SS1_COLLECT_OFF_LEAD_MS < SS1_ARM_PICK_MS,
+               "the source must not go dark before the arm has finished collecting");
 
 /* ======================================================================
  * Animators
@@ -335,6 +352,7 @@ typedef struct {
 
 typedef enum {
     BL_EMPTY = 0,  /* dark, waiting for the first material of a batch        */
+    BL_ACK,        /* blue, acknowledging the first pour -- change 17.4      */
     BL_HOLDING,    /* DARK, holding one material, waiting a whole carry for  */
                    /* the other -- change 16.4, see below                    */
     BL_BLENDING,   /* blue, both materials in, actually mixing              */
@@ -737,18 +755,36 @@ static void blender_material_in(void)
         return;                      /* a full blender cannot take more */
     }
 
+    /* Change 17.4: every pour is acknowledged in blue, so the operator can see
+     * the material land. What differs is what follows. On the FIRST it is only
+     * an acknowledgement -- there is nothing to mix yet, so it goes dark again
+     * after SS1_RECEIVE_ACK_MS and waits. On the SECOND the blue simply stays
+     * on, because now it really is working, and it runs until the blend is
+     * done. Same colour, two different meanings, and the difference is exactly
+     * whether the module has anything to do. */
+    set_mod(SS1_SLOT_BLENDER, MOD_RUNNING);
+
     if (s_blender_materials >= SS1_MATERIALS_PER_BATCH) {
-        set_mod(SS1_SLOT_BLENDER, MOD_RUNNING);   /* blue: mixing, right now  */
         s_blender = BL_BLENDING;
         timer_start(&s_blender_timer, SS1_BLEND_RUN_MS);
     } else {
-        s_blender = BL_HOLDING;                   /* dark, and honestly so    */
+        s_blender = BL_ACK;
+        timer_start(&s_blender_timer, SS1_RECEIVE_ACK_MS);
     }
 }
 
 static void blender_tick(void)
 {
     switch (s_blender) {
+    /* The acknowledgement is over; there is still only half a batch in there,
+     * so it goes dark rather than sitting lit for the carry it has to wait. */
+    case BL_ACK:
+        if (timer_expired(&s_blender_timer)) {
+            set_mod(SS1_SLOT_BLENDER, MOD_OFF);
+            s_blender = BL_HOLDING;
+        }
+        break;
+
     case BL_BLENDING:
         if (timer_expired(&s_blender_timer)) {
             /* Change 12.2: blue while working, then green when it is done and

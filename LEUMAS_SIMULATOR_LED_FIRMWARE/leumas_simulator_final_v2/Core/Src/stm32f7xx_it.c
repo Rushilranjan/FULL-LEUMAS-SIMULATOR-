@@ -20,6 +20,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "stm32f7xx_it.h"
+#include "app.h"   /* app_on_ble_uart_irq -- change 17.8 */
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 /* USER CODE END Includes */
@@ -230,6 +231,16 @@ void EXTI15_10_IRQHandler(void)
 /**
   * @brief This function handles DMA2 stream1 global interrupt.
   */
+/**
+  * @brief This function handles USART6 global interrupt.
+  */
+void USART6_IRQHandler(void)
+{
+  /* USER CODE BEGIN USART6_IRQn 0 */
+  app_on_ble_uart_irq();
+  /* USER CODE END USART6_IRQn 0 */
+}
+
 void DMA2_Stream1_IRQHandler(void)
 {
   /* USER CODE BEGIN DMA2_Stream1_IRQn 0 */

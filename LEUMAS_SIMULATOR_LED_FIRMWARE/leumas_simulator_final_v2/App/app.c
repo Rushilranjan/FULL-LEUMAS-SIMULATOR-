@@ -74,6 +74,11 @@ void app_on_button_exti(uint16_t gpio_pin)
     button_on_exti(gpio_pin);
 }
 
+void app_on_ble_uart_irq(void)
+{
+    ble_on_irq();
+}
+
 void app_on_pwm_complete(TIM_HandleTypeDef *htim)
 {
     led_strip_on_dma_complete(htim);

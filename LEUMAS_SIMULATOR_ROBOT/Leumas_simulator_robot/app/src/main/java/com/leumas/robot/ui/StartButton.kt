@@ -27,6 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -63,7 +64,9 @@ fun StartButton(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1900, easing = LinearEasing),
+            // Matched to WaitingEdgeGlow's surge so the border and the button breathe together
+            // rather than beating against each other (change 17.2).
+            animation = tween(1500, easing = LinearEasing),
             repeatMode = RepeatMode.Reverse,
         ),
         label = "breath",
@@ -77,7 +80,14 @@ fun StartButton(
     )
 
     val accent = if (waiting) WAIT_ACCENT else START_ACCENT
-    val glow = (0.30f + 0.34f * breath) * alpha
+    val glow = (0.30f + 0.50f * breath) * alpha
+
+    // Change 17.2: the button bulges as it breathes. A pulsing halo alone was too easy to miss --
+    // the control itself has to move, because that is what makes the eye treat it as the thing
+    // waiting to be pressed rather than as decoration. Small enough that it never looks unstable
+    // and never shifts the text baseline enough to be hard to read. Frozen while WAITING: once
+    // START is sent, the button is no longer asking for anything.
+    val bulge = if (waiting) 1f else 1f + 0.045f * breath
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
 
@@ -103,6 +113,7 @@ fun StartButton(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
             modifier = Modifier
+                .scale(bulge)
                 .clip(RoundedCornerShape(PILL_CORNER.dp))
                 .background(
                     Brush.verticalGradient(

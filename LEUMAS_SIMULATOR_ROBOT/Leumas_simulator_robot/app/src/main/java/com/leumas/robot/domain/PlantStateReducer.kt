@@ -84,12 +84,22 @@ object PlantStateReducer {
         )
 
         /*
-         * Change 16.7: a selection, not a state change. The board has chosen a sequence and is
-         * sitting dark waiting for START -- nothing is running, nothing is lit, and the plant model
-         * must not pretend otherwise. It is the ViewModel that reacts to this, by showing the
-         * recipe and offering the button. The plant only learns anything when SEQ arrives.
+         * Change 16.7 / 17.1: a selection, and a CLEARING one.
+         *
+         * The board has chosen a sequence and is sitting dark waiting for START -- nothing is
+         * running and nothing is lit, so the plant model must not keep showing what the last run
+         * left behind. Before 17.1 it did: press select after a run and the task card still read
+         * "RUNNING MODULE ..." and the cycle bar still stood where it had stopped, describing a
+         * board that was by then completely dark.
+         *
+         * So this wipes the same way a sequence start does, with one deliberate difference: it
+         * does NOT set currentSequence, because nothing has started. The run is announced by SEQ
+         * when the operator presses START, and until then the plant genuinely knows nothing.
+         *
+         * controllerReady survives, as it does through SEQ -- READY is sent once at boot and a
+         * later selection is no reason to forget we ever heard it.
          */
-        is McuEvent.RecipeSelected -> state
+        is McuEvent.RecipeSelected -> PlantState(controllerReady = true)
 
         is McuEvent.Unknown -> state
     }

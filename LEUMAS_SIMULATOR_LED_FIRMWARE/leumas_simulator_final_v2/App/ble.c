@@ -16,6 +16,23 @@ static bool     s_start_pending; /* consumed once by ble_take_start()          *
 static uint32_t s_rx_bytes;
 static char     s_rx_last[BLE_LINE_MAX + 1];
 
+/* Change 17.8: the ISR writes here and ble_poll() reads, so the main loop can
+ * take as long as it likes without losing a byte. A power-of-two size makes the
+ * wrap a mask. 64 bytes is ~66 ms of runway at 9600 baud, far longer than any
+ * main-loop pass, and the only traffic inbound is single short commands.
+ *
+ * head is written only by the ISR and tail only by the main loop, both are
+ * single words, and each side reads the other's index once -- so this needs no
+ * critical section on Cortex-M. volatile keeps the compiler from caching them
+ * across the loop in ble_poll(). */
+#define BLE_RX_RING   64u
+#define BLE_RX_MASK   (BLE_RX_RING - 1u)
+
+static volatile uint8_t  s_ring[BLE_RX_RING];
+static volatile uint16_t s_ring_head;
+static volatile uint16_t s_ring_tail;
+static volatile uint32_t s_rx_dropped;   /* ring full: should stay 0 forever */
+
 void ble_init(UART_HandleTypeDef *huart)
 {
     s_uart          = huart;
@@ -24,6 +41,44 @@ void ble_init(UART_HandleTypeDef *huart)
     s_start_pending = false;
     s_rx_bytes      = 0u;
     s_rx_last[0]    = '\0';
+    s_ring_head     = 0u;
+    s_ring_tail     = 0u;
+    s_rx_dropped    = 0u;
+
+    /* Change 17.8: take receive off the main loop entirely. The NVIC line is
+     * not enabled by CubeMX -- the link was transmit-only when the .ioc was
+     * generated -- so it is enabled here, next to the only code that needs it.
+     * Priority is deliberately below the LED DMA: a late byte is recoverable,
+     * a disturbed WS2812B frame is a visible glitch on the strip. */
+    if (s_uart != NULL) {
+        __HAL_UART_ENABLE_IT(s_uart, UART_IT_RXNE);
+        HAL_NVIC_SetPriority(USART6_IRQn, 6, 0);
+        HAL_NVIC_EnableIRQ(USART6_IRQn);
+    }
+}
+
+void ble_on_irq(void)
+{
+    UART_HandleTypeDef *u = s_uart;
+    if (u == NULL) {
+        return;
+    }
+    /* An overrun latches RXNE off; clearing it here keeps the receiver alive
+     * even if one byte was already lost. */
+    if (__HAL_UART_GET_FLAG(u, UART_FLAG_ORE)) {
+        __HAL_UART_CLEAR_OREFLAG(u);
+    }
+    while (__HAL_UART_GET_FLAG(u, UART_FLAG_RXNE)) {
+        uint8_t  c    = (uint8_t)(u->Instance->RDR & 0xFFu);
+        uint16_t head = s_ring_head;
+        uint16_t next = (uint16_t)((head + 1u) & BLE_RX_MASK);
+        if (next == s_ring_tail) {
+            s_rx_dropped++;      /* full: drop the newest, keep the oldest line */
+        } else {
+            s_ring[head]  = c;
+            s_ring_head   = next;
+        }
+    }
 }
 
 static void ble_send(const char *msg)
@@ -114,18 +169,13 @@ static void ble_handle_char(uint8_t c)
 
 void ble_poll(void)
 {
-    UART_HandleTypeDef *u = s_uart;
-    if (u == NULL) {
-        return;
-    }
-    /* An overrun latches RXNE off; clear it so a START still lands after the
-     * line has been ignored for a while. Same treatment as the console. */
-    if (__HAL_UART_GET_FLAG(u, UART_FLAG_ORE)) {
-        __HAL_UART_CLEAR_OREFLAG(u);
-    }
-    /* Drain whatever is waiting. Reading RDR clears RXNE, so this ends. */
-    while (__HAL_UART_GET_FLAG(u, UART_FLAG_RXNE)) {
-        ble_handle_char((uint8_t)(u->Instance->RDR & 0xFFu));
+    /* Change 17.8: the UART is not touched here any more -- the ISR has already
+     * taken the bytes off it. This just parses whatever the ring holds, which
+     * can take as long as it needs to without costing a byte. */
+    while (s_ring_tail != s_ring_head) {
+        uint8_t c   = s_ring[s_ring_tail];
+        s_ring_tail = (uint16_t)((s_ring_tail + 1u) & BLE_RX_MASK);
+        ble_handle_char(c);
     }
 }
 
@@ -139,4 +189,5 @@ bool ble_take_start(void)
 }
 
 uint32_t    ble_rx_bytes(void) { return s_rx_bytes; }
+uint32_t    ble_rx_dropped(void) { return s_rx_dropped; }
 const char *ble_rx_last(void)  { return s_rx_last; }

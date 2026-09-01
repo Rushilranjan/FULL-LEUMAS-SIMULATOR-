@@ -49,6 +49,18 @@ void ble_lot_done(void);
  * SEQ means "running", RECIPE means "chosen, waiting for you". */
 void ble_recipe(uint8_t seq);
 
+/* Called from USART6_IRQHandler. Moves received bytes into the ring buffer and
+ * does nothing else -- all parsing happens later, in ble_poll().
+ *
+ * Change 17.8: this exists because polling RXNE from the main loop DROPS BYTES,
+ * observed on the rig as `BLE rx: 6 bytes, last line: "STAT"` for a START that
+ * is seven bytes and spells START. At 9600 baud a byte lands every ~1.04 ms,
+ * and a single main-loop pass drives the WS2812B DMA, the sequence tick and a
+ * blocking HAL_UART_Transmit for every BLE cue -- any one of which can outlast
+ * a byte time. The receiver has to be an interrupt; there is no polling rate
+ * that makes this safe. */
+void ble_on_irq(void);
+
 /* Drain whatever the app has sent. Call every main-loop pass; never blocks. */
 void ble_poll(void);
 
@@ -67,6 +79,7 @@ bool ble_take_start(void);
  * the original link only ever needed PC6. A non-zero count with no line, or a
  * line that is not START, is a framing or content problem and is ours. */
 uint32_t    ble_rx_bytes(void);
+uint32_t    ble_rx_dropped(void); /* ring overflows; must stay 0 */
 const char *ble_rx_last(void);   /* last complete line, "" if none yet */
 
 #endif /* APP_BLE_H */

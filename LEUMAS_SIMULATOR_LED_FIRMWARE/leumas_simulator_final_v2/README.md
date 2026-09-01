@@ -45,42 +45,51 @@ packaged, and put out on the exit strip. Two robot carries, one blender batch, o
 3. **Robot collects the gravimetric material** and dumps it into the blender. That dump starts the
    gravimetric's own recharge on pixels 0-9. When either recharge finishes, its module goes blue and
    starts producing again.
-4. **Blender → Packaging.** No robot movement: the blender goes green, then material flows along
-   pixels **14-16**, four times. The blender then goes dark.
+4. **Blender → Packaging.** No robot movement. The blender shows blue for 2 s to acknowledge each
+   pour; after the first it goes dark again, having only half a batch and nothing to do (change
+   16.4), and after the second it stays blue and **blends** for 8 s. Then it goes green and material
+   flows along pixels **14-16**, three times. The blender then goes dark.
 5. **Packaging → output.** Packaging goes blue on receiving, finishes the lot, goes green, and puts
-   it out along pixels **17-21**, twice. `LOT:DONE` goes out and the cycle counter ticks over.
+   it out along pixels **17-21**, three times. `LOT:DONE` goes out and the cycle counter ticks over.
 
 **Nothing is reset and the board is never blanked at a cycle boundary.** Steps 4 and 5 play
 *underneath* the arm, which has already set off on the next cycle's macro carry — the plant runs
 roughly a cycle behind it, and the arm never waits for either. All eight carries of a run are cued
-61.5 s apart, from the first to the last, with no pause anywhere.
+42 s apart, from the first to the last, with no pause anywhere.
 
-Lots therefore ship every **123 s**, and the whole four-cycle run takes **9 min 11 s** from `SEQ:1`
+Lots therefore ship every **84 s**, and the whole four-cycle run takes **6 min 30 s** from `SEQ:1`
 to the last `LOT:DONE`.
 
-### Why a carry takes 58.5 seconds
+### Why a carry takes 42 seconds
 
-The BLE link is transmit-only, so the board cannot ask the Android app where the arm is. The two
-therefore run as **open-loop clocks driven from the same constants**: the `SS1_ARM_*` block in
-`Core/Inc/config.h` is a phase-for-phase copy of `RobotPhase` in the app's `RobotStateMachine.kt`,
-and a `_Static_assert` in `solid_seq1.c` fails the build if the totals stop matching.
+The BLE link carries no position information — `START` goes in, cues come out, and no `ARRIVED`
+ever comes back — so the board cannot ask the Android app where the arm is. The two therefore run
+as **open-loop clocks driven from the same numbers**: the `SS1_ARM_*` block in `Core/Inc/config.h`
+is `RobotPhase` from the app's `RobotStateMachine.kt`, fraction by fraction, against the app's
+40 s `DEFAULT_ROBOT_ANIMATION_MS`. Two `_Static_assert`s in `solid_seq1.c` fail the build if either
+the arm total or the carry stops matching the app.
 
-That is what lets every module colour change fire while the arm is visibly in front of it:
+**Change 17.6 is why those numbers are what they are.** The board used to describe a 58.5 s arm
+with explicit 20 s collect and pour dwells, while the app animated the whole carry in 40 s — so the
+board cued the next `MOVE` at 61.5 s against an arm that had finished moving at 40 s, and it stood
+still for a third of every trip. The dwells are not added on top any more: `PICKING` **is** the
+collect and `PLACING` **is** the pour, because that is how the app draws them.
 
 | after the `MOVE` cue | the arm is | the board does |
 |---|---|---|
 | 0 s | leaving home | source module already green |
-| 3.2 s | arriving at the module | — |
-| 6.3 s | gripper shut, **standing there collecting for 20 s** | — |
-| 26.3 s | lifting away | source module → **dark** |
-| 31.1 s | arriving at the blender | blender → **blue**, receiving; the source starts its recharge; on a macro carry, the gravimetric goes **green** |
-| 34.1 s | gripper open, **standing there pouring for 20 s** | — |
-| 54.1 s | retracting | that material is now in |
-| 58.5 s | back at rail centre | — |
+| 3.8 s | arriving at the module | — |
+| 6.4 s | gripper closing, then **collecting for 7.4 s** | — |
+| 13.8 s | lifting away | source module → **dark** |
+| 21.6 s | arriving at the blender | the source starts its recharge; on a macro carry, the gravimetric goes **green** |
+| 24.2 s | gripper opening, then **pouring for 7.4 s** | — |
+| 31.6 s | retracting | that material is in — blender → **blue** |
+| 40 s | back at rail centre | — |
 
-The arm then rests 3 s at home (`SS1_ARM_HOME_HOLD_MS`) before the next carry is cued, so two
-animations can never overlap. Half of each cycle is the arm standing still: that is what a 20-second
-collection looks like, and it is deliberate.
+The arm then rests 2 s at home (`SS1_ARM_HOME_HOLD_MS`) before the next carry is cued, so two
+animations still cannot overlap. Change 17.6 cut that from 3 s: the requirement is that the arm is
+never idle for more than two seconds, and with the models reconciled that rest is now the *only*
+time it is idle at all.
 
 ### What it looks like on the strip
 
@@ -153,15 +162,17 @@ The BLE link is **transmit-only** — `MOVE:a>b` goes out, nothing comes back. T
 acknowledgement and no `HOME` command, so the firmware cannot know where the arm actually is. One MOVE
 cue goes out **per material carry**, when that carry begins, and the Android app plays its own full
 travel/collect/carry/pour/return-home animation against it. That is also why the robot needs no reset
-between cycles: it parks itself. Two MOVE cues per cycle, eight per run, all 61.5 s apart.
+between cycles: it parks itself. Two MOVE cues per cycle, eight per run, all 42 s apart.
 
 Because there is no handshake, the two sides stay in step only by sharing constants. The `SS1_ARM_*`
 block in `Core/Inc/config.h` mirrors `RobotPhase` in the app's `RobotStateMachine.kt` phase for phase,
 and `solid_seq1.c` asserts the total at compile time:
 
 ```c
-_Static_assert(SS1_ARM_TOTAL_MS == 58500u,
-               "SS1_ARM_* must sum to RobotPhase.TOTAL_MS in the Android app");
+_Static_assert(SS1_ARM_TOTAL_MS == 40000u,
+               "SS1_ARM_* must sum to Timings.DEFAULT_ROBOT_ANIMATION_MS in the app");
+_Static_assert(SS1_T_CARRY == 42000u,
+               "SS1_T_CARRY must equal Timings.CARRY_MS in the Android app");
 ```
 
 **Change a phase on one side and you must change the other.** If you retune the arm in the app, update
@@ -496,24 +507,24 @@ void HAL_TIM_ErrorCallback(TIM_HandleTypeDef *htim)     { app_on_tim_error(htim)
     |---|---|
     | 0 s | Module 2 + 3 **blue**, everything else dark, strip dark |
     | 20 s | Module 2 **green** — and **Module 3 stays blue**; `MOVE:2>5`; the arm sets off |
-    | 46.3 s | Module 2 **dark** — the arm should be lifting away as it happens |
-    | 51.1 s | Module 5 **blue**; **Module 3 goes green**; the **0-5 recharge starts** — all three on the pour |
-    | 59.7 s | Module 2 back to **blue** (recharge done, strip 0-5 goes dark) |
-    | 79.7 s | Module 2 **green** again, waiting for its next carry |
-    | 81.5 s | `MOVE:3>5`; the arm sets off for the gravimetric |
-    | 107.8 s | Module 3 **dark**, the arm lifting away |
-    | 112.6 s | the **0-9 recharge** starts (Module 5 is already blue and stays blue) |
-    | 123.8 s | Module 3 back to **blue** (recharge done, strip 0-9 goes dark) |
-    | 143 s | `MOVE:2>5` — **cycle 2's first carry, while lot 1 is still in the plant** |
-    | 147.6 s | Module 5 **green**; 14→15→16 fills and blanks **four times** |
-    | 160.8 s | Module 5 **dark**; Module 6 **blue** |
-    | 172.8 s | Module 6 **green**; 17→18→19→20→21 fills toward the output, **twice** |
-    | 174.1 s | Module 5 **blue** again (cycle 2's macro going in); Module 3 **green** |
-    | 182.2 s | `LOT:DONE`. **The board does not blank and nothing resets** — the app moves to cycle 2 |
+    | 33.8 s | Module 2 **dark** — the arm should be lifting away as it happens |
+    | 41.6 s | **Module 3 goes green** and the **0-5 recharge starts** — both on the macro pour |
+    | 50.2 s | Module 2 back to **blue** (recharge done, strip 0-5 goes dark) |
+    | 51.6 s | Module 5 **blue** for 2 s, acknowledging the macro, then dark again |
+    | 62 s | `MOVE:3>5`; the arm sets off for the gravimetric |
+    | 70.2 s | Module 2 **green** again, waiting for its next carry |
+    | 75.8 s | Module 3 **dark**, the arm lifting away |
+    | 93.6 s | Module 5 **blue** — both materials in, now actually blending |
+    | 94.8 s | Module 3 back to **blue** (its recharge is done) |
+    | 101.6 s | Module 5 **green**; 14→15→16 fills and blanks **three times** |
+    | 104 s | `MOVE:2>5` — **cycle 2's first carry, while lot 1 is still in the plant** |
+    | 111.5 s | Module 5 **dark**; Module 6 **blue** |
+    | 123.5 s | Module 6 **green**; 17→…→21 fills toward the output, **three times** |
+    | 137.6 s | `LOT:DONE`. **The board does not blank and nothing resets** — the app moves to cycle 2 |
 
-    From there it repeats every **123 s**: `LOT:DONE` at 182.2, 305.2, 428.2 and 551.2 s. After the
-    last carry is cued at 450.5 s there are no further `RUN:2` / `RUN:3` — with no next collection to
-    be ready for, the feeders stay dark and the last 100 s is the blender and packaging alone.
+    From there it repeats every **84 s**: `LOT:DONE` at 137.6, 221.6, 305.6 and 389.6 s. After the
+    last carry is cued at 314 s there are no further `RUN:2` / `RUN:3` — with no next collection to
+    be ready for, the feeders stay dark and the last stretch is the blender and packaging alone.
 
 10. **Recharge shape** — watch 0-5 from t=51.1 s. Pixels must light **one at a time and stay lit** —
     `0`, `0,1`, `0,1,2` … `0..5` — then the whole span blanks, and that same fill runs again, three
@@ -528,8 +539,8 @@ void HAL_TIM_ErrorCallback(TIM_HandleTypeDef *htim)     { app_on_tim_error(htim)
     the two sides' constants have drifted — check `SS1_ARM_*` against `RobotPhase`.
 12. **Colours** — only blue, green and dark, all at full brightness. Nothing blinks. The strip is
     white and clearly dimmer than the modules.
-13. **After cycle 4** (~9 min 11 s) the board is dark, `seq` reports **COMPLETE**, and cycle 5 does
-    **not** start. `seq` should read cycle 4 from t=428 s onward — the counter stops at the last
+13. **After cycle 4** (~6 min 30 s) the board is dark, `seq` reports **COMPLETE**, and cycle 5 does
+    **not** start. `seq` should read cycle 4 from t=306 s onward — the counter stops at the last
     cycle rather than running on to 5.
 14. `red 20 30` mid-sequence → refused with the `seq stop` message, strip unchanged. `seq stop` → the
     strip blanks and manual commands work again. Watch the BLE line: **no further `MOVE:` messages**
@@ -537,7 +548,7 @@ void HAL_TIM_ErrorCallback(TIM_HandleTypeDef *htim)     { app_on_tim_error(htim)
 15. **Button** — press it mid-run: the demo restarts cleanly from cycle 1.
 16. **BLE** — a whole run emits `SEQ:1` **once** (never again — a cycle boundary is not a restart),
     then exactly eight `MOVE:` cues alternating `2>5` / `3>5`, and exactly four `LOT:DONE`, plus
-    `RUN:`/`DONE:` on each module colour change. Consecutive `MOVE` cues must be **61.5 s apart**,
+    `RUN:`/`DONE:` on each module colour change. Consecutive `MOVE` cues must be **42 s apart**,
     every time, including across a cycle boundary — the arm's 58.5 s animation plus its 3 s rest.
     Watch for `DONE:3` never sharing a moment with `DONE:2`: it must arrive with the `RUN:5` of a
     macro pour (change 13.1). There is no cycle message on the wire — the app counts `LOT:DONE`.
@@ -556,14 +567,15 @@ void HAL_TIM_ErrorCallback(TIM_HandleTypeDef *htim)     { app_on_tim_error(htim)
   its total above — two `_Static_assert`s enforce both, so a bad pair fails the build rather than
   the demo.
 - **Run length** — `SS1_CYCLES` (4) is the only lever on total runtime, and nothing else depends on
-  it. A cycle is one lot and lots ship 123 s apart, so the run is `182 + 123 x (SS1_CYCLES - 1)`
-  seconds: four cycles is ~9 min 11 s, two is ~5 min 5 s, eight is ~19 min.
-- **Fixed durations** — the 20 s windows (`SS1_INITIAL_PROCESS_MS`, `SS1_COLLECTION_MS`,
-  `SS1_DUMP_MS`) are pinned by the requirement and must not be shortened; `SS1_BLEND_RUN_MS` and
-  `SS1_PACKAGING_FINISH_MS` were trimmed to 12 s by change 11.3 and may be retuned. Note that
-  `SS1_COLLECTION_MS` and `SS1_DUMP_MS` are **also** the arm's dwell phases: shortening them here
-  without shortening `RobotPhase.COLLECTING` / `DUMPING` in the Android app breaks the build, by
-  design.
+  it. A cycle is one lot and lots ship 84 s apart, so the run is `138 + 84 x (SS1_CYCLES - 1)`
+  seconds: four cycles is ~6 min 30 s, two is ~3 min 42 s, eight is ~13 min.
+- **Fixed durations** — `SS1_INITIAL_PROCESS_MS` (20 s, both feeders producing at the start) is
+  pinned by the requirement. `SS1_BLEND_RUN_MS` (8 s) and `SS1_PACKAGING_FINISH_MS` (12 s) may be
+  retuned freely. `SS1_COLLECTION_MS` and `SS1_DUMP_MS` are **gone** as of change 17.6: the arm's
+  dwells are `SS1_ARM_PICK_MS` and `SS1_ARM_PLACE_MS`, 7.4 s each, and they come straight from the
+  app's `RobotPhase` fractions. Lengthening the stand-and-collect means editing those fractions in
+  the app first and mirroring them here — doing it on the board alone is exactly what put the two
+  20.5 s out of step.
 - **Inferred windows** the requirement leaves open, tune freely: `SS1_ARM_HOME_HOLD_MS` (the rest at
   rail centre between carries — this is the slack that keeps two arm animations from overlapping, so
   do not take it to zero), `SS1_CHARGE_BLANK_MS` and `SS1_CHARGE_REPEATS`. `SS1_GRAV_READY_AT_MS`

@@ -35,6 +35,9 @@ void app_tick(void);
 
 /* Forward these from the matching HAL weak callbacks. */
 void app_on_button_exti(uint16_t gpio_pin);
+
+/* USART6 (the BLE link) received something. Called from USART6_IRQHandler. */
+void app_on_ble_uart_irq(void);
 void app_on_pwm_complete(TIM_HandleTypeDef *htim);
 void app_on_tim_error(TIM_HandleTypeDef *htim);
 
