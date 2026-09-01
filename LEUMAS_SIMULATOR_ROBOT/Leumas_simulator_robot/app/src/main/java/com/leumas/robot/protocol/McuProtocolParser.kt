@@ -31,8 +31,9 @@ object McuProtocolParser {
     private fun parseSequence(line: String): McuEvent {
         val n = line.removePrefix(PREFIX_SEQ).toIntOrNull()
             ?: return McuEvent.Unknown(line, "SEQ payload is not a number")
-        // Not range-checked against {1,2,4,5}: a future firmware may add sequences, and showing
-        // an unexpected sequence number is more honest than discarding it.
+        // Not range-checked against the one sequence the firmware currently emits (1): a future
+        // firmware may add sequences, and showing an unexpected number is more honest than
+        // discarding it.
         return McuEvent.SequenceStarted(n)
     }
 

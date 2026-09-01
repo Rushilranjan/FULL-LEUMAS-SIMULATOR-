@@ -9,29 +9,55 @@ import com.leumas.robot.protocol.TransferKind
 /**
  * The explicit robot animation state machine required by spec §21.
  *
- * Phase fractions sum to exactly 1.0 of [totalDurationMs]. Every phase is visible: spec §11 wants
- * an audience to follow each joint movement, so no phase is allowed to be instantaneous.
+ * **Phases are declared in milliseconds, and those milliseconds are a contract with the firmware.**
+ * The BLE link is transmit-only — nothing comes back, so the MCU cannot ask where the arm is. The
+ * only way the physical rig's LEDs and this animation can agree is for both to be driven from the
+ * same numbers, so every value here has a twin in the firmware's `Core/Inc/config.h` `SS1_ARM_*`
+ * block, in this order. A `_Static_assert` there checks the total against [TOTAL_MS]; change one
+ * side without the other and the firmware build fails rather than the demo drifting.
+ *
+ * [COLLECTING] and [DUMPING] are the dwells — the arm stands still at the module for the full
+ * `SS1_COLLECTION_MS` / `SS1_DUMP_MS`. Before they existed the arm did one continuous pass and was
+ * long gone by the time the rig marked the module as collected-from, which is exactly the fault the
+ * trial run reported. Every phase is visible: spec §11 wants an audience to follow each joint
+ * movement, so no phase is allowed to be instantaneous.
  */
-enum class RobotPhase(val fraction: Float) {
-    MOVING_TO_SOURCE(0.17f),
-    POSITIONING_AT_SOURCE(0.07f),
-    PICKING(0.10f),
-    LIFTING(0.06f),
-    MOVING_TO_DESTINATION(0.20f),
-    POSITIONING_AT_DESTINATION(0.06f),
-    PLACING(0.10f),
-    RETRACTING(0.08f),
+enum class RobotPhase(val durationMs: Long) {
+    MOVING_TO_SOURCE(3_150),
+    POSITIONING_AT_SOURCE(1_300),
+    PICKING(1_850),
+
+    /** Stood at the source with the gripper closed — `SS1_COLLECTION_MS`. */
+    COLLECTING(20_000),
+
+    LIFTING(1_100),
+    MOVING_TO_DESTINATION(3_700),
+    POSITIONING_AT_DESTINATION(1_100),
+    PLACING(1_850),
+
+    /** Stood at the blender with the gripper open, pouring — `SS1_DUMP_MS`. */
+    DUMPING(20_000),
+
+    RETRACTING(1_500),
 
     /**
      * Post-demo change 10.2: after every transfer the robot travels back to the middle of the rail
-     * (its home/default position) and re-stows before going idle. Roughly 0.16 of the whole
-     * animation ≈ 3 s of the 18 s budget, so the ~15 s that remains is the transfer proper.
+     * (its home/default position) and re-stows before going idle.
      */
-    RETURNING_HOME(0.16f),
+    RETURNING_HOME(2_950),
     ;
+
+    /**
+     * Share of the whole animation. A getter rather than a constructor-computed `val`, because
+     * [TOTAL_MS] is a companion property and would still be zero while the entries are being built.
+     */
+    val fraction: Float get() = durationMs.toFloat() / TOTAL_MS
 
     companion object {
         val ORDERED: List<RobotPhase> = entries.toList()
+
+        /** 58 500 ms. Must equal `SS1_ARM_TOTAL_MS` in the firmware. */
+        val TOTAL_MS: Long = entries.sumOf { it.durationMs }
     }
 }
 
@@ -72,10 +98,13 @@ data class RobotAnimationState(
  * older pending transfer is *dropped* and counted in [droppedTransfers] — dropping the stale one
  * keeps the visualisation closest to what the MCU is currently doing.
  *
- * **Catch-up.** On the solid line the firmware sends `MOVE:1>4` then `MOVE:3>4` exactly
- * [Timings.TRANSFER_ROBOT_MS] apart. Whenever something is pending, animated time advances up to
- * [Timings.MAX_CATCHUP_FACTOR]× faster so the backlog drains. The factor is capped, so a backlog
- * degrades to "brisk" and never to a teleport — spec §10 forbids the robot jumping.
+ * **Catch-up.** The firmware paces its carries off the same phase table this class animates, so
+ * consecutive `MOVE` cues are never closer than [Timings.TRANSFER_ROBOT_MS] — one full animation
+ * plus the firmware's `SS1_ARM_HOME_HOLD_MS` of slack. A backlog therefore should not happen at
+ * all; the machinery stays because a dropped BLE notification or a mid-run restart can still
+ * bunch cues up. Whenever something is pending, animated time advances up to
+ * [Timings.MAX_CATCHUP_FACTOR]× faster so it drains. The factor is capped, so a backlog degrades
+ * to "brisk" and never to a teleport — spec §10 forbids the robot jumping.
  *
  * Not thread-safe; drive it from the frame loop only.
  */
@@ -177,10 +206,12 @@ class RobotStateMachine(
      */
     private fun RobotPhase.isCarrying(progress: Float): Boolean = when (this) {
         RobotPhase.PICKING -> progress > 0.6f
+        RobotPhase.COLLECTING,
         RobotPhase.LIFTING,
         RobotPhase.MOVING_TO_DESTINATION,
         RobotPhase.POSITIONING_AT_DESTINATION -> true
         RobotPhase.PLACING -> progress < 0.6f
+        // DUMPING: the payload is in the blender by now, so the gripper is empty.
         else -> false
     }
 

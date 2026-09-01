@@ -17,27 +17,30 @@ sealed interface McuEvent {
     data object Ready : McuEvent
 
     /**
-     * A new sequence started. Only 1, 2, 4 and 5 are reachable — `SEQ_CYCLE` skips 3.
+     * A new sequence started. The current firmware only emits `SEQ:1` (Solid Sequence 1), and
+     * only **once per run** — the four production cycles do NOT each re-emit it.
      *
-     * Treat as a hard reset: `lotmgr_start` wipes all lot state, and a mid-run button press
-     * re-emits this, so any in-flight animation must be abandoned.
+     * Treat as a hard reset: `solid_seq1_start()` clears all state, and a mid-run button press
+     * re-emits this, so any in-flight animation must be abandoned. A plain cycle boundary is not
+     * a reset and carries no `SEQ`.
      */
     data class SequenceStarted(val sequence: Int) : McuEvent
 
     /**
-     * A module entered its run phase.
+     * A module entered its run phase (blue on the rig).
      *
-     * May repeat for the same slot with no intervening [ModuleDone]: the warm-macro path emits
-     * `RUN` from both the power-on warm-up loop and lot injection. Handling must be idempotent.
+     * The firmware de-dupes state changes, so a `RUN` is not normally repeated for the same slot
+     * without an intervening [ModuleDone] — but handling is kept idempotent anyway, so a repeat
+     * from a future firmware, or a bare recharge-complete `RUN`, can never desync the model.
      */
     data class ModuleRun(val slot: Int) : McuEvent
 
     /**
-     * A module's run phase ended.
+     * A module's run phase ended: it is now green — completed, ready for the robot to collect.
      *
      * This does **not** mean the module is retired — it may still be the source of a later
-     * [Move]. It also cannot be distinguished from "waiting on a bottleneck": the MCU shows that
-     * as pulsing yellow on the LEDs, but the wire protocol carries no such state.
+     * [Move], and a slot can cycle green→blue→green within one sequence (the blender does:
+     * ready-to-receive, running, ready-to-ship).
      */
     data class ModuleDone(val slot: Int) : McuEvent
 
@@ -50,10 +53,12 @@ sealed interface McuEvent {
     data class Move(val from: Int, val to: Int, val kind: TransferKind) : McuEvent
 
     /**
-     * The lot has shipped.
+     * A production cycle has shipped its lot.
      *
-     * Fires at the **start** of the 10 s exit swipe, once per button press. Nothing is sent when
-     * that swipe finishes.
+     * Fires **once per cycle** — four times over a full Solid Sequence 1 run, at the end of each
+     * cycle after the packaging→output strip flow. It is not the end of the whole run; the next
+     * cycle's `RUN` cues follow ~`SS1_CYCLE_GAP_MS` later (with no `SEQ`). Nothing is sent to mark
+     * the very end of the fourth cycle beyond its own `LOT:DONE`.
      */
     data object LotDone : McuEvent
 

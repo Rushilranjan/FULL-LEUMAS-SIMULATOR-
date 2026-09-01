@@ -4,13 +4,15 @@ package com.leumas.robot.protocol
  * The physical slot map, mirroring `App/config.c` `MODULE_TYPES[]` in the STM32 firmware.
  *
  * IMPORTANT: the firmware has **11** slots, not the 9 claimed by section 5 of the spec.
- * `MODULE_COUNT` is 11 (`Core/Inc/config.h`), and sequences 4/5 really do emit `RUN:11`
- * and `MOVE:8>10`. The "9" in the spec is only defensible as *9 user-calibrated modules* —
- * every slot except Packaging(6) and Bottling(11), which section 7 designates special
- * stations. So: size everything 1..11, calibrate 9.
+ * `MODULE_COUNT` is 11 (`Core/Inc/config.h`). The "9" in the spec is only defensible as
+ * *9 user-calibrated modules* — every slot except Packaging(6) and Bottling(11), which
+ * section 7 designates special stations. So: size everything 1..11, calibrate 9.
  *
- * If `SOLID_RECIPE` / `LIQUID_RECIPE` in `App/lotmgr.c` ever change, this table and
- * [transferKind] must change with them.
+ * The current firmware, **Solid Sequence 1** (`App/solid_seq1.c`), drives only slots 2, 3, 5
+ * and 6 (Macro 2, Gravimetric, Blender 2, Packaging). The liquid line (7..11) and the unused
+ * solid slots (1, 4) stay dark, but they remain mapped here because the physical rig still has
+ * them and a liquid sequence is expected later. If the firmware's slot roles in
+ * `App/config.c` ever change, this table and [transferKind] must change with them.
  */
 object SlotMap {
 
@@ -52,13 +54,16 @@ object SlotMap {
     /**
      * Decide whether a `MOVE:a>b` is a real robot-arm trip or a strip/conveyor transfer.
      *
-     * The firmware gives us no way to tell these apart on the wire: `ble_move()` is called
-     * unconditionally in `start_trip()` (`App/lotmgr.c`), *above* the `XFER_SWIPE` branch, so
-     * robot trips and strip swipes produce byte-identical messages. Destination role is the
-     * only reliable discriminator:
+     * Under Solid Sequence 1 the firmware only ever emits a `MOVE` for the two robot carries, and
+     * both go to the blender (slot 5): `MOVE:2>5` and `MOVE:3>5`. The board's own material flows
+     * (blender→packaging, packaging→output) are drawn on the LED strip and send **no** `MOVE` at
+     * all, so the app is never asked to animate them.
      *
-     *  - dst is a BLENDER or VESSEL  -> `XFER_ROBOT`,  20000 ms, animate the arm
-     *  - dst is PACKAGING or BOTTLING -> `XFER_SWIPE`, 15000 ms, conveyor band, no arm
+     * Destination role stays the discriminator, so this keeps working if a future sequence does
+     * send conveyor-style moves:
+     *
+     *  - dst is a BLENDER or VESSEL   -> animate the arm
+     *  - dst is PACKAGING or BOTTLING -> conveyor band, no arm
      *
      * Anything else is unexpected. We return [TransferKind.PROCESS] for it, because spec §29
      * forbids inventing robot movement — a wrong conveyor animation is a far smaller lie than

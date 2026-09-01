@@ -25,33 +25,75 @@
 #define SS1_OUT_A     ((uint8_t)SOLID_EXIT_A)                             /* 17 */
 #define SS1_OUT_B     ((uint8_t)SOLID_EXIT_B)                             /* 21 */
 
-/* ---- compile-time guards -------------------------------------------------
- * Closed form of the recharge duration, so the "macro must have finished
- * recharging before the gravimetric one starts" rule is checked by the
- * compiler rather than discovered on the demo table.
+/* ---- carry timing --------------------------------------------------------
+ * A carry is one MOVE cue and then a fixed sequence of moments: the arm
+ * arrives, grips, stands there collecting, lifts away, crosses to the blender,
+ * pours, and goes home. The board's job is to change each module's colour at
+ * the moment the arm is actually in front of it — a module going dark while the
+ * arm is still standing at it was the single most obvious fault in the trial
+ * run.
  *
- * K stages of CHUNK pixels; stage k swipes (len - k*CHUNK) pixels and each
- * swipe ends with one extra dwell on the last pixel, so stage k costs exactly
- * (len - k*CHUNK) steps. */
-#define SS1_CHARGE_STAGES(len)  (((len) + SS1_CHARGE_CHUNK - 1u) / SS1_CHARGE_CHUNK)
-#define SS1_CHARGE_STEPS(len)   ( SS1_CHARGE_STAGES(len) * (len)                  \
-                                - SS1_CHARGE_CHUNK * SS1_CHARGE_STAGES(len)       \
-                                  * (SS1_CHARGE_STAGES(len) - 1u) / 2u )
-#define SS1_CHARGE_MS(len)      ( SS1_CHARGE_STEPS(len) * SS1_CHARGE_STEP_MS      \
-                                + SS1_CHARGE_STAGES(len) * SS1_CHARGE_STAGE_MS    \
-                                + SS1_CHARGE_HOLD_MS )
+ * The SS1_ARM_* milestones in config.h are offsets from the MOVE cue; the steps
+ * below need the gaps BETWEEN them, which is all these are. Change a phase in
+ * config.h and every step retimes itself. */
+#define SS1_T_GRIP_AND_COLLECT  ( SS1_ARM_TO_SOURCE_MS + SS1_ARM_POS_SOURCE_MS \
+                                + SS1_ARM_PICK_MS )                        /*  6300 */
+#define SS1_T_COLLECT_END       ( SS1_ARM_COLLECT_END_MS )                 /* 26300 */
+#define SS1_T_CROSS_TO_DEST     ( SS1_ARM_AT_DEST_MS                       \
+                                - SS1_ARM_COLLECT_END_MS )                 /*  4800 */
+#define SS1_T_DUMP_HOLD         ( SS1_ARM_DUMP_END_MS                      \
+                                - SS1_ARM_AT_DEST_MS )                     /* 22950 */
+#define SS1_T_GO_HOME           ( SS1_ARM_TOTAL_MS - SS1_ARM_DUMP_END_MS   \
+                                + SS1_ARM_HOME_HOLD_MS )                   /*  7450 */
+#define SS1_T_DUMP_AFTER_GRAV   ( SS1_T_DUMP_HOLD - SS1_GRAV_READY_AT_MS ) /*  9950 */
 
-/* SLOT_LEDS is a const array, not a constant expression, so the guard below
- * uses the span length that map currently yields. Keep it in step with
- * SLOT_LEDS[SS1_SLOT_MACRO] if the rig is ever re-measured. */
+/* ---- compile-time guards -------------------------------------------------
+ * SLOT_LEDS is a const array, not a constant expression, so the guards below
+ * use the span lengths that map currently yields. Keep them in step with
+ * SLOT_LEDS[SS1_SLOT_MACRO] / [SS1_SLOT_GRAVIMETRIC] if the rig is
+ * re-measured; seq_leds_print_map() ("seq map") is the check by eye. */
 #define SS1_MACRO_SPAN_LEN   6u
+#define SS1_GRAV_SPAN_LEN   10u
 
-_Static_assert(SS1_CHARGE_CHUNK >= 1u,
-               "a recharge stage must latch at least one pixel");
-_Static_assert(SS1_GRAV_READY_AT_MS < SS1_DUMP_MS,
-               "the gravimetric READY point must fall inside the dump");
-_Static_assert(SS1_CHARGE_MS(SS1_MACRO_SPAN_LEN) <= SS1_COLLECTION_MS + SS1_DUMP_MS,
-               "the macro recharge must finish before the gravimetric one starts");
+#define SS1_MACRO_CHARGE_MS  SS1_CHARGE_MS(SS1_MACRO_SPAN_LEN, SS1_CHARGE_FILL_MACRO_MS)
+#define SS1_GRAV_CHARGE_MS   SS1_CHARGE_MS(SS1_GRAV_SPAN_LEN,  SS1_CHARGE_FILL_GRAV_MS)
+
+/* The board and the Android arm are two open-loop clocks with no handshake
+ * between them, so this is the one number that must be identical on both
+ * sides. RobotPhase.TOTAL_MS in RobotStateMachine.kt. Editing a phase in
+ * config.h without editing the Kotlin (or vice versa) fails the build here
+ * rather than drifting silently on the demo table. */
+_Static_assert(SS1_ARM_TOTAL_MS == 58500u,
+               "SS1_ARM_* must sum to RobotPhase.TOTAL_MS in the Android app");
+
+/* The gravimetric goes GREEN partway through the blender dump. Measured from
+ * the arm reaching the blender, so it must land inside the dump hold — if it
+ * did not, the step timer below would underflow to ~49 days. */
+_Static_assert(SS1_GRAV_READY_AT_MS < SS1_ARM_DUMP_END_MS - SS1_ARM_AT_DEST_MS,
+               "the gravimetric READY point must fall inside the dump hold");
+
+/* Each recharge has to finish inside the window it plays in, because there is
+ * ONE Ss1Charge instance and the macro's 0..5 is a subset of the gravimetric's
+ * 0..9 — two live at once would scribble over each other. */
+_Static_assert(SS1_MACRO_CHARGE_MS <= SS1_COLLECTION_MS,
+               "the macro recharge must finish before the arm leaves module 3");
+_Static_assert(SS1_GRAV_CHARGE_MS <= SS1_BLEND_RUN_MS,
+               "the gravimetric recharge must finish before the blender hands off");
+
+/* ss1_block_len() encodes "first pixel / up to the middle / all of them". Raise
+ * SS1_CHARGE_BLOCKS and the middle case would simply repeat itself rather than
+ * subdividing further, which would look like a stutter rather than a mistake —
+ * so make it a build error instead of a puzzle on the demo table. */
+_Static_assert(SS1_CHARGE_BLOCKS == 3u,
+               "the block-extent rule only makes sense for three blocks");
+
+/* Requirement: the gravimetric span fills faster per pixel but takes slightly
+ * longer overall. Fast enough not to drag over 10 pixels, long enough that the
+ * bigger module still reads as the bigger job. */
+_Static_assert(SS1_CHARGE_FILL_GRAV_MS < SS1_CHARGE_FILL_MACRO_MS,
+               "the gravimetric recharge must fill faster per pixel");
+_Static_assert(SS1_GRAV_CHARGE_MS > SS1_MACRO_CHARGE_MS,
+               "the gravimetric recharge must still take slightly longer overall");
 
 /* ======================================================================
  * Animators
@@ -87,34 +129,58 @@ static void bump_due(uint32_t *due, uint32_t step_ms)
 }
 
 /* ---- progressive recharge ------------------------------------------------
- * A head crawls from the first uncharged pixel to the end of the span. When it
- * gets there the next CHUNK pixels latch solid and the head restarts from just
- * past them, so the charged section grows and the remaining run gets shorter
- * every pass. Over the macro's 0..5 that is exactly the three stages the
- * requirement spells out: swipe 0->5 and keep 0,1; swipe 2->5 and keep 0..3;
- * swipe 4->5 and keep 0..5. The same code over 0..9 gives five stages.
+ * Deliberately NOT a swipe. A travelling head reads as something moving past
+ * the module; charging is a level filling up, so the pixels latch on in place
+ * and stay on. Two stages, over the macro's 0..5:
  *
- * The head and the solid pixels are the same white at 1% — motion alone tells
- * them apart, which is the point: the audience sees charge accumulating, not an
- * animation being played. The head only ever travels [a + solid, b] and `solid`
- * only changes while no head is moving, so the two can never collide. */
+ *   STAGE 1   0 | 0,1 | 0,1,2 | 0..3 | 0..4 | 0..5   then the span blanks
+ *             one pixel per SS1_CHARGE_FILL_*_MS, each one staying lit.
+ *
+ *   STAGE 2   0 | blank | 0,1,2 | blank | 0..5 | blank
+ *             three growing blocks, the group repeated
+ *             SS1_CHARGE_BLOCK_REPEATS times.
+ *
+ * Then the span goes DARK and stays dark. The old animation left the charged
+ * pixels lit, which meant the macro's 0..5 was still on screen when the
+ * gravimetric restarted on the overlapping 0..9 — the two looked like one
+ * animation glitching. A recharged module announces itself by its own LED
+ * going blue; the strip's job is finished.
+ *
+ * Block extents come from one rule, chosen so it reproduces the requirement's
+ * "1st LED / up to the 3rd / all" over six pixels exactly, and generalises:
+ *   1 / (len+1)/2 / len   ->  1,3,6 over 0..5   and   1,5,10 over 0..9 */
 typedef enum {
     CH_IDLE = 0,
-    CH_SWIPE,    /* head walking towards the end of the span                */
-    CH_LATCH,    /* stage pause, the new chunk now solid                    */
-    CH_HOLD,     /* whole span solid, holding before it counts as done      */
-    CH_DONE      /* complete; stays lit until the next ss1_charge_reset()   */
+    CH_FILL,      /* stage 1: one more pixel latches on each step            */
+    CH_FILL_GAP,  /* stage 1 done, span blanked, short pause before stage 2  */
+    CH_BLOCK_ON,  /* stage 2: a block is lit, holding                        */
+    CH_BLOCK_OFF, /* stage 2: span dark, holding between blocks              */
+    CH_DONE       /* complete, span already dark                             */
 } Ss1ChargePhase;
 
 typedef struct {
     Ss1ChargePhase phase;
     uint8_t  a, b;      /* inclusive strip span                              */
     uint8_t  len;       /* b - a + 1                                         */
-    uint8_t  solid;     /* pixels latched solid so far, counting from `a`    */
-    uint8_t  head;      /* the moving pixel while CH_SWIPE                   */
+    uint8_t  n;         /* stage 1: pixels lit so far                        */
+    uint8_t  block;     /* stage 2: which block, 0..SS1_CHARGE_BLOCKS-1      */
+    uint8_t  rep;       /* stage 2: groups completed                         */
     uint8_t  owner;     /* slot that goes BLUE when this completes           */
+    uint16_t step_ms;   /* stage 1 per-pixel dwell; macro and grav differ    */
     uint32_t due;
 } Ss1Charge;
+
+/* Pixels lit by block k of a span of `len`: 1, then up to the middle, then all. */
+static uint8_t ss1_block_len(uint8_t k, uint8_t len)
+{
+    if (k == 0u) {
+        return 1u;
+    }
+    if (k + 1u >= SS1_CHARGE_BLOCKS) {
+        return len;
+    }
+    return (uint8_t)((len + 1u) / 2u);
+}
 
 /* ---- material flow -------------------------------------------------------
  * The span fills one pixel at a time, holds full for one step, blanks, and
@@ -147,12 +213,13 @@ typedef struct {
 typedef enum {
     S_INIT = 0,      /* M2,M3 blue; M5,M6 dark; strip clear                   */
     S_MACRO_READY,   /* M2 green — macro done, robot may collect              */
-    S_COLLECT_1,     /* MOVE:2>5, robot collecting macro material             */
-    S_LEAVE_M2_1,    /* M2 dark — robot about to leave                        */
-    S_DUMP_1A,       /* M5 dark — receiving macro material                    */
+    S_COLLECT_1,     /* MOVE:2>5, arm travels and then collects for 20 s      */
+    S_LEAVE_M2_1,    /* M2 dark — the arm is lifting away                     */
+    S_DUMP_1A,       /* M5 dark — the arm has arrived, blender receiving      */
     S_DUMP_1B,       /* M3 green — gravimetric finished mid-dump              */
-    S_BLENDER_RUN_1, /* M5 blue — blending                                    */
-    S_COLLECT_2,     /* MOVE:3>5, and the macro starts recharging             */
+    S_BLENDER_RUN_1, /* M5 blue — the arm is retracting; blending             */
+    S_COLLECT_2,     /* MOVE:3>5, arm travelling to the gravimetric           */
+    S_RECHARGE_MACRO,/* the arm is now stood collecting; macro recharges 0..5 */
     S_LEAVE_M3_1,    /* M3 dark, M5 green — blender ready to receive          */
     S_DUMP_2,        /* gravimetric material going into the blender           */
     S_BLEND_GATE,    /* M5 blue; hold here until the macro recharge is done   */
@@ -176,12 +243,14 @@ typedef enum {
 } Ss1Step;
 
 static const char *const SS1_STEP_NAME[S_STEP_COUNT] = {
-    "INIT",       "MACRO_READY",  "COLLECT_1",  "LEAVE_M2_1", "DUMP_1A",
-    "DUMP_1B",    "BLENDER_RUN_1","COLLECT_2",  "LEAVE_M3_1", "DUMP_2",
-    "BLEND_GATE", "BLEND_RUN",    "XFER",       "PACK_RUN",   "MACRO_READY_2",
-    "COLLECT_3",  "LEAVE_M2_2",   "DUMP_3A",    "DUMP_3B",    "BLENDER_RUN_2",
-    "COLLECT_4",  "LEAVE_M3_2",   "DUMP_4",     "PACK_FINISH","OUTPUT",
-    "CYCLE_END",  "COMPLETE"
+    "INIT",           "MACRO_READY",  "COLLECT_1",  "LEAVE_M2_1",
+    "DUMP_1A",        "DUMP_1B",      "BLENDER_RUN_1",
+    "COLLECT_2",      "RECHARGE_MACRO","LEAVE_M3_1","DUMP_2",
+    "BLEND_GATE",     "BLEND_RUN",    "XFER",       "PACK_RUN",
+    "MACRO_READY_2",  "COLLECT_3",    "LEAVE_M2_2", "DUMP_3A",
+    "DUMP_3B",        "BLENDER_RUN_2","COLLECT_4",  "LEAVE_M3_2",
+    "DUMP_4",         "PACK_FINISH",  "OUTPUT",     "CYCLE_END",
+    "COMPLETE"
 };
 
 /* ---- state ---------------------------------------------------------------
@@ -225,26 +294,28 @@ static void ss1_charge_reset(Ss1Charge *c)
         seq_leds_strip_set(c->a, c->b, false);
     }
     c->phase = CH_IDLE;
-    c->solid = 0u;
-    c->head  = 0u;
+    c->n     = 0u;
+    c->block = 0u;
+    c->rep   = 0u;
 }
 
-static void ss1_charge_start(Ss1Charge *c, uint8_t a, uint8_t b, uint8_t owner)
+static void ss1_charge_start(Ss1Charge *c, uint8_t a, uint8_t b,
+                             uint8_t owner, uint16_t step_ms)
 {
     ss1_charge_reset(c);
-    c->a     = a;
-    c->b     = b;
-    c->len   = (uint8_t)((b >= a) ? (b - a + 1u) : 0u);
-    c->owner = owner;
-    c->solid = 0u;
-    c->head  = a;
+    c->a       = a;
+    c->b       = b;
+    c->len     = (uint8_t)((b >= a) ? (b - a + 1u) : 0u);
+    c->owner   = owner;
+    c->step_ms = step_ms;
     if (c->len == 0u) {
         c->phase = CH_DONE;
         return;
     }
-    seq_leds_strip_set(c->head, c->head, true);
-    c->phase = CH_SWIPE;
-    c->due   = millis() + SS1_CHARGE_STEP_MS;
+    seq_leds_strip_set(a, a, true);     /* stage 1 opens on the first pixel */
+    c->n     = 1u;
+    c->phase = CH_FILL;
+    c->due   = millis() + step_ms;
 }
 
 static inline bool ss1_charge_done(const Ss1Charge *c) { return c->phase == CH_DONE; }
@@ -256,41 +327,54 @@ static void ss1_charge_tick(Ss1Charge *c)
     }
 
     switch (c->phase) {
-    case CH_SWIPE:
-        if (c->head < c->b) {
-            seq_leds_strip_set(c->head, c->head, false);   /* the head moves on */
-            c->head++;
-            seq_leds_strip_set(c->head, c->head, true);
-            bump_due(&c->due, SS1_CHARGE_STEP_MS);
+    case CH_FILL:
+        if (c->n < c->len) {
+            /* One more pixel joins the ones already lit — nothing is cleared. */
+            seq_leds_strip_set((uint8_t)(c->a + c->n), (uint8_t)(c->a + c->n), true);
+            c->n++;
+            bump_due(&c->due, c->step_ms);
         } else {
-            /* End of the run: clear the head and light the next chunk for good. */
-            seq_leds_strip_set(c->head, c->head, false);
-            c->solid = (uint8_t)((c->solid + SS1_CHARGE_CHUNK > c->len)
-                                 ? c->len : (c->solid + SS1_CHARGE_CHUNK));
-            seq_leds_strip_set(c->a, (uint8_t)(c->a + c->solid - 1u), true);
-            c->phase = CH_LATCH;
-            c->due   = millis() + SS1_CHARGE_STAGE_MS;
+            seq_leds_strip_set(c->a, c->b, false);
+            c->phase = CH_FILL_GAP;
+            c->due   = millis() + SS1_CHARGE_BLANK_MS;
         }
         break;
 
-    case CH_LATCH:
-        if (c->solid >= c->len) {
-            c->phase = CH_HOLD;
-            c->due   = millis() + SS1_CHARGE_HOLD_MS;
-        } else {
-            c->head  = (uint8_t)(c->a + c->solid);
-            seq_leds_strip_set(c->head, c->head, true);
-            c->phase = CH_SWIPE;
-            c->due   = millis() + SS1_CHARGE_STEP_MS;
-        }
+    case CH_FILL_GAP:
+        c->block = 0u;
+        c->rep   = 0u;
+        seq_leds_strip_set(c->a, (uint8_t)(c->a + ss1_block_len(0u, c->len) - 1u), true);
+        c->phase = CH_BLOCK_ON;
+        c->due   = millis() + SS1_CHARGE_BLOCK_ON_MS;
         break;
 
-    case CH_HOLD:
-        /* Recharged. The module it belongs to starts running again — this is
-         * where "macro is available again" and "gravimetric is available again"
-         * actually happen, driven by the animation rather than by the clock. */
-        c->phase = CH_DONE;
-        set_mod(c->owner, MOD_RUNNING);
+    case CH_BLOCK_ON:
+        seq_leds_strip_set(c->a, c->b, false);
+        c->phase = CH_BLOCK_OFF;
+        c->due   = millis() + SS1_CHARGE_BLOCK_OFF_MS;
+        break;
+
+    case CH_BLOCK_OFF:
+        c->block++;
+        if (c->block >= SS1_CHARGE_BLOCKS) {
+            c->block = 0u;
+            c->rep++;
+        }
+        if (c->rep >= SS1_CHARGE_BLOCK_REPEATS) {
+            /* Recharged. The span is already dark — a recharged module is
+             * signalled by its own LED going blue, not by leaving the strip
+             * lit. This is where "macro is available again" and "gravimetric is
+             * available again" actually happen, driven by the animation
+             * finishing rather than by a separate clock. */
+            c->phase = CH_DONE;
+            set_mod(c->owner, MOD_RUNNING);
+        } else {
+            seq_leds_strip_set(c->a,
+                               (uint8_t)(c->a + ss1_block_len(c->block, c->len) - 1u),
+                               true);
+            c->phase = CH_BLOCK_ON;
+            c->due   = millis() + SS1_CHARGE_BLOCK_ON_MS;
+        }
         break;
 
     default:
@@ -415,23 +499,30 @@ static void enter_step(Ss1Step s)
         break;
 
     /* ---- Phase 1: robot collects from the macro -------------------------
-     * One MOVE cue covers the whole carry — travel, pick, place and the return
-     * home are all the Android app's animation, and the collect and dump
-     * windows below are this side's account of the same 20 seconds. Do not add
-     * a second cue or a travel timer: with no ARRIVED coming back, either would
-     * be inventing robot timing. */
+     * One MOVE cue covers the whole carry — travel, grip, the 20 s stood
+     * collecting, the crossing, the 20 s stood pouring and the return home are
+     * all one animation in the Android app. Do not add a second cue: with no
+     * ARRIVED coming back there is nothing to synchronise against.
+     *
+     * What this side CAN do is peg its own colour changes to the same
+     * milestones the arm is animating to. SS1_T_COLLECT_END is the moment the
+     * arm finishes collecting and starts to lift, so the macro stays green for
+     * the whole time the arm is stood at it. */
     case S_COLLECT_1:
     case S_COLLECT_3:
         ble_move(SLOT1(SS1_SLOT_MACRO), SLOT1(SS1_SLOT_BLENDER));
-        ms = SS1_COLLECTION_MS;
+        ms = SS1_T_COLLECT_END;
         break;
 
     case S_LEAVE_M2_1:
     case S_LEAVE_M2_2:
-        set_mod(SS1_SLOT_MACRO, MOD_OFF);
+        set_mod(SS1_SLOT_MACRO, MOD_OFF);   /* the arm is lifting away now */
+        ms = SS1_T_CROSS_TO_DEST;
         break;
 
-    /* ---- Phase 2: macro material into the blender ------------------------ */
+    /* ---- Phase 2: macro material into the blender ------------------------
+     * Entered as the arm reaches the blender, so the blender goes dark to
+     * receive at the moment there is something to receive. */
     case S_DUMP_1A:
     case S_DUMP_3A:
         set_mod(SS1_SLOT_BLENDER, MOD_OFF);
@@ -441,24 +532,38 @@ static void enter_step(Ss1Step s)
     case S_DUMP_1B:
     case S_DUMP_3B:
         set_mod(SS1_SLOT_GRAVIMETRIC, MOD_READY);
-        ms = SS1_DUMP_MS - SS1_GRAV_READY_AT_MS;
+        ms = SS1_T_DUMP_AFTER_GRAV;
         break;
 
+    /* The pour is finished and the arm is retracting: the blender is running.
+     * The wait is the arm's trip home plus a beat stood at rail centre, so the
+     * next MOVE never lands while the previous animation is still playing. */
     case S_BLENDER_RUN_1:
     case S_BLENDER_RUN_2:
         set_mod(SS1_SLOT_BLENDER, MOD_RUNNING);
+        ms = SS1_T_GO_HOME;
         break;
 
-    /* ---- Phase 3 + 3A: collect the gravimetric while the macro recharges -- */
+    /* ---- Phase 3 + 3A: collect the gravimetric while the macro recharges --
+     * This carry is split across two steps, unlike the others, so the recharge
+     * starts when the arm has actually settled into collecting rather than
+     * while it is still crossing the rig. The two waits add up to the same
+     * SS1_T_COLLECT_END the other carries use in one go. */
     case S_COLLECT_2:
         ble_move(SLOT1(SS1_SLOT_GRAVIMETRIC), SLOT1(SS1_SLOT_BLENDER));
-        ss1_charge_start(&s_charge, SS1_MACRO_A, SS1_MACRO_B, SS1_SLOT_MACRO);
+        ms = SS1_T_GRIP_AND_COLLECT;
+        break;
+
+    case S_RECHARGE_MACRO:
+        ss1_charge_start(&s_charge, SS1_MACRO_A, SS1_MACRO_B,
+                         SS1_SLOT_MACRO, SS1_CHARGE_FILL_MACRO_MS);
         ms = SS1_COLLECTION_MS;
         break;
 
+    /* The second gravimetric carry recharges nothing, so it needs no split. */
     case S_COLLECT_4:
         ble_move(SLOT1(SS1_SLOT_GRAVIMETRIC), SLOT1(SS1_SLOT_BLENDER));
-        ms = SS1_COLLECTION_MS;
+        ms = SS1_T_COLLECT_END;
         break;
 
     /* ---- Phase 4: robot leaves the gravimetric --------------------------- */
@@ -466,12 +571,13 @@ static void enter_step(Ss1Step s)
     case S_LEAVE_M3_2:
         set_mod(SS1_SLOT_GRAVIMETRIC, MOD_OFF);
         set_mod(SS1_SLOT_BLENDER,     MOD_READY);   /* ready to receive */
+        ms = SS1_T_CROSS_TO_DEST;
         break;
 
     /* ---- Phase 5: gravimetric material into the blender ------------------ */
     case S_DUMP_2:
     case S_DUMP_4:
-        ms = SS1_DUMP_MS;
+        ms = SS1_T_DUMP_HOLD;
         break;
 
     /* ---- Phase 6: blender runs; gravimetric recharge may now start -------
@@ -485,7 +591,8 @@ static void enter_step(Ss1Step s)
         break;
 
     case S_BLEND_RUN:
-        ss1_charge_start(&s_charge, SS1_GRAV_A, SS1_GRAV_B, SS1_SLOT_GRAVIMETRIC);
+        ss1_charge_start(&s_charge, SS1_GRAV_A, SS1_GRAV_B,
+                         SS1_SLOT_GRAVIMETRIC, SS1_CHARGE_FILL_GRAV_MS);
         ms = SS1_BLEND_RUN_MS;
         break;
 
@@ -590,10 +697,12 @@ void solid_seq1_tick(void)
     ss1_flow_tick(&s_flow);
 
     switch (s_step) {
-    /* Instant: a state change with no dwell of its own. */
-    case S_MACRO_READY:   case S_LEAVE_M2_1:  case S_BLENDER_RUN_1:
-    case S_LEAVE_M3_1:    case S_MACRO_READY_2: case S_LEAVE_M2_2:
-    case S_BLENDER_RUN_2: case S_LEAVE_M3_2:
+    /* Instant: a state change with no dwell of its own. The module goes green
+     * and the MOVE cue that collects it goes out on the next pass — a gap here
+     * would be a module sitting ready with the arm ignoring it. Every other
+     * step now waits for something real, which is the point of the rework. */
+    case S_MACRO_READY:
+    case S_MACRO_READY_2:
         advance = true;
         break;
 

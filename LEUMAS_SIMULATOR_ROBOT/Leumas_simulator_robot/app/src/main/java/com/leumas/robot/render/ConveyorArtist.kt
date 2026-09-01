@@ -16,7 +16,7 @@ data class ConveyorFlow(
     val toSlot: Int,
     val from: EdgePoint,
     val to: EdgePoint,
-    /** 0..1 through the 10 s swipe. */
+    /** 0..1 through the swipe. The caller owns the duration. */
     val progress: Float,
 )
 

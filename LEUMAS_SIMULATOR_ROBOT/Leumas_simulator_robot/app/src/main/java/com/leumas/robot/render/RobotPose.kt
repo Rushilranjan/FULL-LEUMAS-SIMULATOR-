@@ -100,7 +100,8 @@ class RobotPoser {
         val carriageX = when (phase) {
             RobotPhase.MOVING_TO_SOURCE -> lerp(transferStartX, srcX, travel)
             RobotPhase.MOVING_TO_DESTINATION -> lerp(srcX, dstX, travel)
-            RobotPhase.POSITIONING_AT_SOURCE, RobotPhase.PICKING, RobotPhase.LIFTING -> srcX
+            RobotPhase.POSITIONING_AT_SOURCE, RobotPhase.PICKING,
+            RobotPhase.COLLECTING, RobotPhase.LIFTING -> srcX
             // Change 10.2: travel back to the middle of the rail once the payload is placed.
             RobotPhase.RETURNING_HOME -> lerp(dstX, geometry.railCentreX, travel)
             else -> dstX
@@ -114,7 +115,7 @@ class RobotPoser {
             RobotPhase.POSITIONING_AT_SOURCE -> srcYaw
             RobotPhase.MOVING_TO_DESTINATION -> srcYaw
             RobotPhase.POSITIONING_AT_DESTINATION -> lerp(srcYaw, dstYaw, travel)
-            RobotPhase.PICKING, RobotPhase.LIFTING -> srcYaw
+            RobotPhase.PICKING, RobotPhase.COLLECTING, RobotPhase.LIFTING -> srcYaw
             // Unwind the turret back to its neutral facing as it homes.
             RobotPhase.RETURNING_HOME -> lerp(dstYaw, 0f, travel)
             else -> dstYaw
@@ -129,18 +130,24 @@ class RobotPoser {
         val armTarget = when (phase) {
             RobotPhase.MOVING_TO_SOURCE, RobotPhase.POSITIONING_AT_SOURCE -> stow
             RobotPhase.PICKING -> lerp(stow, srcReach, settle)
+            // The two dwells hold the pose the reach ended on, so the arm is visibly parked in the
+            // module for the whole collection / dump rather than passing through it.
+            RobotPhase.COLLECTING -> srcReach
             RobotPhase.LIFTING -> lerp(srcReach, carry, travel)
             RobotPhase.MOVING_TO_DESTINATION, RobotPhase.POSITIONING_AT_DESTINATION -> carry
             RobotPhase.PLACING -> lerp(carry, dstReach, settle)
+            RobotPhase.DUMPING -> dstReach
             RobotPhase.RETRACTING -> lerp(dstReach, stow, travel)
             // Already stowed; the arm simply rides the carriage back to centre.
             RobotPhase.RETURNING_HOME -> stow
         }
 
         // The gripper closes at the end of PICKING and opens partway through PLACING, matching
-        // RobotStateMachine's payload window.
+        // RobotStateMachine's payload window. It stays shut through COLLECTING and is already open
+        // by DUMPING, which the `else` covers.
         val gripperOpen = when (phase) {
             RobotPhase.PICKING -> if (state.phaseProgress > 0.6f) 0f else 1f
+            RobotPhase.COLLECTING,
             RobotPhase.LIFTING,
             RobotPhase.MOVING_TO_DESTINATION,
             RobotPhase.POSITIONING_AT_DESTINATION -> 0f

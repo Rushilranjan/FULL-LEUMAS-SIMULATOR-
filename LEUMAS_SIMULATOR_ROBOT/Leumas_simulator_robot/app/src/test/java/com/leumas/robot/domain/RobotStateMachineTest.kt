@@ -134,15 +134,42 @@ class RobotStateMachineTest {
 
     @Test
     fun `payload is held between pickup and release`() {
+        // Probes are placed by phase, not by round numbers: over a 1000 ms animation the phase
+        // boundaries are MOVING_TO_SOURCE 0-54, ..., PICKING 76-108, COLLECTING 108-450,
+        // MOVING_TO_DESTINATION 468-532, PLACING 552-582, DUMPING 582-924, RETURNING_HOME 950-1000.
         val m = RobotStateMachine(totalDurationMs = 1000L)
         m.submit(robotMove(1, 4), 0L)
         m.update(0L)
 
         fun carryingAt(t: Long): Boolean = m.update(t).carryingPayload
 
-        assertFalse("empty while travelling to source", carryingAt(100L))
-        assertTrue("carrying while travelling to destination", carryingAt(550L))
-        assertFalse("empty again after release", carryingAt(980L))
+        assertFalse("empty while travelling to source", carryingAt(30L))
+        assertTrue("carrying while stood collecting", carryingAt(300L))
+        assertTrue("carrying while travelling to destination", carryingAt(500L))
+        assertFalse("empty while stood dumping — the material is in the blender", carryingAt(700L))
+        assertFalse("empty again on the way home", carryingAt(980L))
+    }
+
+    @Test
+    fun `the arm stands still at both ends of a carry`() {
+        // The whole point of the rework: the rig marks a module as collected-from only once the arm
+        // has actually stood there, so the two dwells must dominate the animation. They are
+        // SS1_COLLECTION_MS and SS1_DUMP_MS in the firmware's config.h.
+        assertEquals(20_000L, RobotPhase.COLLECTING.durationMs)
+        assertEquals(20_000L, RobotPhase.DUMPING.durationMs)
+
+        val dwell = RobotPhase.COLLECTING.durationMs + RobotPhase.DUMPING.durationMs
+        assertTrue(
+            "dwells are $dwell ms of ${RobotPhase.TOTAL_MS} ms",
+            dwell > RobotPhase.TOTAL_MS / 2,
+        )
+    }
+
+    @Test
+    fun `phase table matches the firmware arm mirror`() {
+        // SS1_ARM_TOTAL_MS in Core/Inc/config.h, which the firmware _Static_asserts against 58500.
+        // If this fails, the rig's LED transitions and the arm are no longer on the same clock.
+        assertEquals(58_500L, RobotPhase.TOTAL_MS)
     }
 
     @Test

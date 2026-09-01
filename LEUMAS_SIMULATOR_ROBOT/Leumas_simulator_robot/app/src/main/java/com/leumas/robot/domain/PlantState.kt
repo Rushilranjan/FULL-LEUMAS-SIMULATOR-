@@ -6,10 +6,10 @@ import com.leumas.robot.protocol.TransferKind
 /**
  * What a module is doing, as far as the MCU has told us.
  *
- * Note the deliberate absence of a WAITING state. The rig's LEDs distinguish "pulsing yellow,
- * blocked by the bottleneck" from "idle red", but the wire protocol carries only RUN and DONE —
- * there is no way to tell them apart from here. Spec §13 forbids inventing process state, so we
- * do not guess.
+ * The states here mirror what the wire protocol can actually tell us — RUN, DONE and the two
+ * transfer directions. Solid Sequence 1 uses only OFF / RUNNING (blue) / READY (green) on the
+ * rig and carries no "waiting" state, so there is nothing here to represent one. Spec §13 forbids
+ * inventing process state, so we never guess at anything the MCU has not reported.
  */
 enum class ModuleState {
     /** Nothing heard about this slot since the last sequence start. */

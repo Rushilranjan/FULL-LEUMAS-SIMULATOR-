@@ -100,7 +100,8 @@ class Robot3DPoser {
         val carriageX = when (phase) {
             RobotPhase.MOVING_TO_SOURCE -> lerp(transferStartX, srcX, travel)
             RobotPhase.MOVING_TO_DESTINATION -> lerp(srcX, dstX, travel)
-            RobotPhase.POSITIONING_AT_SOURCE, RobotPhase.PICKING, RobotPhase.LIFTING -> srcX
+            RobotPhase.POSITIONING_AT_SOURCE, RobotPhase.PICKING,
+            RobotPhase.COLLECTING, RobotPhase.LIFTING -> srcX
             RobotPhase.RETURNING_HOME -> lerp(dstX, Arena3D.HOME_X, travel)
             else -> dstX
         }
@@ -113,7 +114,8 @@ class Robot3DPoser {
         // yaw blends go through [lerpAngle] so they always take the shortest arc.
         val baseYaw = when (phase) {
             RobotPhase.MOVING_TO_SOURCE -> lerpAngle(0f, srcYaw, travel)
-            RobotPhase.POSITIONING_AT_SOURCE, RobotPhase.PICKING, RobotPhase.LIFTING -> srcYaw
+            RobotPhase.POSITIONING_AT_SOURCE, RobotPhase.PICKING,
+            RobotPhase.COLLECTING, RobotPhase.LIFTING -> srcYaw
             RobotPhase.MOVING_TO_DESTINATION -> lerpAngle(srcYaw, dstYaw, travel)
             RobotPhase.POSITIONING_AT_DESTINATION -> dstYaw
             RobotPhase.RETURNING_HOME -> lerpAngle(dstYaw, 0f, travel)
@@ -123,19 +125,25 @@ class Robot3DPoser {
         val armTarget = when (phase) {
             RobotPhase.MOVING_TO_SOURCE, RobotPhase.POSITIONING_AT_SOURCE -> Arena3D.STOW
             RobotPhase.PICKING -> lerp(Arena3D.STOW, srcReach, settle)
+            // The dwells hold the reach they ended on, so the arm is visibly parked inside the
+            // module for the whole collection / dump instead of passing through it.
+            RobotPhase.COLLECTING -> srcReach
             RobotPhase.LIFTING -> lerp(srcReach, Arena3D.CARRY, travel)
             RobotPhase.MOVING_TO_DESTINATION, RobotPhase.POSITIONING_AT_DESTINATION -> Arena3D.CARRY
             RobotPhase.PLACING -> lerp(Arena3D.CARRY, dstReach, settle)
+            RobotPhase.DUMPING -> dstReach
             RobotPhase.RETRACTING -> lerp(dstReach, Arena3D.STOW, travel)
             RobotPhase.RETURNING_HOME -> Arena3D.STOW
         }
 
         val gripperOpen = when (phase) {
             RobotPhase.PICKING -> if (state.phaseProgress > 0.6f) 0f else 1f
+            RobotPhase.COLLECTING,
             RobotPhase.LIFTING,
             RobotPhase.MOVING_TO_DESTINATION,
             RobotPhase.POSITIONING_AT_DESTINATION -> 0f
             RobotPhase.PLACING -> if (state.phaseProgress < 0.6f) 0f else 1f
+            // DUMPING keeps it open — the material is pouring out.
             else -> 1f
         }
 
@@ -143,6 +151,7 @@ class Robot3DPoser {
         // as it places. This is the A4 axis the reference machine rolls the end effector on.
         val wristRoll = when (phase) {
             RobotPhase.PICKING -> lerp(0f, -WRIST_ROLL, settle)
+            RobotPhase.COLLECTING,
             RobotPhase.LIFTING,
             RobotPhase.MOVING_TO_DESTINATION,
             RobotPhase.POSITIONING_AT_DESTINATION -> -WRIST_ROLL

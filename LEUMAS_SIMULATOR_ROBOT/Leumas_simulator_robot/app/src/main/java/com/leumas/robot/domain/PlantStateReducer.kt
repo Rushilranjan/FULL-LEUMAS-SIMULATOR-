@@ -18,10 +18,11 @@ object PlantStateReducer {
         /*
          * A sequence start is DESTRUCTIVE, not additive.
          *
-         * `lotmgr_start()` wipes every lot on the firmware side, and pressing the button mid-run
-         * re-emits SEQ:n without gracefully unwinding the previous run. So everything we believed
-         * about module states and any in-flight transfer is now stale. The animation controller is
-         * aborted separately by the caller.
+         * `solid_seq1_start()` clears all state on the firmware side, and pressing the button
+         * mid-run re-emits SEQ:1 without gracefully unwinding the previous run. So everything we
+         * believed about module states and any in-flight transfer is now stale. The animation
+         * controller is aborted separately by the caller. Note this fires only on a real sequence
+         * start, never on a plain cycle boundary within a run.
          */
         is McuEvent.SequenceStarted -> PlantState(
             controllerReady = true,
@@ -29,8 +30,8 @@ object PlantStateReducer {
         )
 
         /*
-         * Idempotent by construction: the warm-macro path emits RUN twice for the same slot with
-         * no DONE in between, so this must be safe to apply repeatedly.
+         * Kept idempotent: the firmware de-dupes state changes so a slot is not normally re-RUN
+         * without an intervening DONE, but applying RUN repeatedly must stay safe regardless.
          */
         is McuEvent.ModuleRun -> state.copy(
             moduleStates = state.moduleStates + (event.slot to ModuleState.RUNNING),
@@ -50,9 +51,9 @@ object PlantStateReducer {
         )
 
         /*
-         * Fires at the START of the 10 s exit swipe, not at its end — the firmware sends nothing
-         * when the swipe finishes. Callers that want the on-screen completion to land with the
-         * physical strip should hold for EXIT_SWIPE_MS after this.
+         * Fires once per cycle, after that cycle's packaging→output strip flow — four times over a
+         * full run. The next cycle's RUN cues (which clear lotComplete) follow shortly after, so
+         * on a multi-cycle run this state is normally short-lived rather than terminal.
          */
         is McuEvent.LotDone -> state.copy(
             lotComplete = true,

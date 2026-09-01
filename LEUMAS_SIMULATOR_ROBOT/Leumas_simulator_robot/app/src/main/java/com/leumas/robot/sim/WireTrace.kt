@@ -6,87 +6,65 @@ data class TraceStep(val atMs: Long, val messages: List<String>)
 /**
  * Scripted wire traces for development without hardware.
  *
- * Timings are derived from the firmware's `Core/Inc/config.h` constants (`RUN_TIME_MS` 20 s,
- * `TRANSFER_ROBOT_MS` 20 s — change 11.4: ~17 s transfer + ~3 s return-to-home,
- * `TRANSFER_SWIPE_MS` 15 s, `EXIT_SWIPE_MS` 20 s). Robot `MOVE`s are therefore spaced 20 s apart so the
- * one shared arm never overlaps trips or triggers catch-up — the animation budget
- * ([Timings.DEFAULT_ROBOT_ANIMATION_MS], 18.5 s) fits inside that with ~1.5 s to spare, so the arm
- * settles at home before the next cue instead of speeding up. They are *representative*, not exact:
- * the real controller has a 25 ms render tick plus blocking UART time, so treat real hardware as
- * the arbiter.
+ * These mirror what **Solid Sequence 1** (`App/solid_seq1.c`) actually puts on the wire. The
+ * firmware is transmit-only and the app only ever reacts to it (spec §13, §31), so a trace is the
+ * whole contract: get the message order and spacing right and the visuals follow.
  *
- * Messages inside one [TraceStep] are emitted back-to-back, exactly as the firmware does when
- * several `ble_*` calls land in the same tick.
+ * Two facts pace everything:
+ *  - The two robot carries per half-cycle (`MOVE:2>5` then `MOVE:3>5`) are **61.5 s apart**. The
+ *    firmware paces a carry off the same phase table the arm animates
+ *    ([Timings.DEFAULT_ROBOT_ANIMATION_MS], 58.5 s) and then waits `SS1_ARM_HOME_HOLD_MS` (3 s) at
+ *    rail centre, so the arm settles at home before the next cue instead of speeding up.
+ *  - The blender→packaging and packaging→output flows are drawn on the **board LED strip only**;
+ *    the firmware sends no `MOVE` for them, so the app never animates a conveyor or the arm for
+ *    them — exactly as [SlotMap.transferKind] intends.
+ *
+ * These offsets are **generated from the firmware's own constants**, not estimated: the model in
+ * the scratchpad parses `Core/Inc/config.h` and walks the step chain in `App/solid_seq1.c`. They
+ * are still not exact to the millisecond — the real controller has a render tick plus blocking
+ * UART time — so treat real hardware as the arbiter. Messages inside one [TraceStep] are emitted
+ * back-to-back, as the firmware does when several `ble_*` calls land in the same tick, and are
+ * listed in the order the firmware's step chain emits them.
  */
 object WireTrace {
 
     /**
-     * Sequence 1 — the bottleneck story, batch A.
+     * Solid Sequence 1 — one full production cycle (316.7 s), then the start of the next.
      *
-     * Note the duplicate `RUN:1`: the warm-up loop lights every macro, then lot injection emits
-     * `RUN` again for the macro its batch claims. Any handler that assumes RUN/DONE alternate
-     * strictly will break here.
+     * The run emits `SEQ:1` **once** and then loops four cycles (this trace shows one and a bit);
+     * note the absence of a second `SEQ:1` at 316.7 s — a new cycle is NOT a sequence restart, so
+     * the app must not treat the cycle boundary as a hard reset.
+     *
+     * `LOT:DONE` fires **once per cycle** (four times per run), not once per run. The blender
+     * (slot 5) legitimately cycles green→blue→green: ready-to-receive, then running, then
+     * ready-to-ship. The two recharge completions surface as a bare `RUN:2` (102.3 s, macro
+     * recharged) and `RUN:3` (150.4 s, gravimetric recharged) with no preceding `MOVE`.
+     *
+     * The long silences are the point: between `MOVE:2>5` at 20 s and `DONE:3` at 64.1 s the arm is
+     * travelling to the macro, standing there for the 20 s collection, crossing to the blender and
+     * starting to pour. Nothing on the wire should change while the arm is mid-carry — that is what
+     * keeps the rig's LEDs and the arm agreeing about where it is.
      */
-    val SEQ1: List<TraceStep> = listOf(
-        TraceStep(0, listOf("SEQ:1", "RUN:1", "RUN:2", "RUN:1", "RUN:3")),
-        TraceStep(20_000, listOf("DONE:1", "DONE:3", "DONE:2")),
-        TraceStep(20_040, listOf("MOVE:1>4")),    // robot, 20 s
-        TraceStep(40_040, listOf("MOVE:3>4")),    // robot, 20 s — arrives exactly 20 s after the last
-        TraceStep(60_040, listOf("RUN:4")),
-        TraceStep(80_040, listOf("DONE:4")),
-        TraceStep(80_080, listOf("MOVE:4>6")),    // strip swipe, 15 s — must NOT move the arm
-        TraceStep(95_080, listOf("RUN:6")),
-        TraceStep(115_080, listOf("DONE:6")),
-        TraceStep(115_120, listOf("LOT:DONE")),   // start of the 20 s exit flow
-    )
-
-    /** Sequence 2 — two blenders, so both batches flow with no bottleneck wait. */
-    val SEQ2: List<TraceStep> = listOf(
-        TraceStep(0, listOf("SEQ:2", "RUN:1", "RUN:2", "RUN:1", "RUN:3")),
-        TraceStep(20_000, listOf("DONE:1", "DONE:2", "DONE:3")),
-        TraceStep(20_040, listOf("MOVE:1>4")),    // robot
-        TraceStep(40_040, listOf("MOVE:3>4")),    // robot, +20 s
-        TraceStep(60_040, listOf("RUN:4")),       // blender1 fed
-        TraceStep(60_080, listOf("MOVE:2>5")),    // robot, +20 s after 3>4
-        TraceStep(80_040, listOf("DONE:4")),
-        TraceStep(80_080, listOf("MOVE:4>6")),    // blender1 -> packaging swipe, 15 s (ends 95_080)
-        TraceStep(80_120, listOf("MOVE:3>5")),    // robot, +20 s after 2>5
-        TraceStep(100_120, listOf("RUN:5")),      // blender2 fed
-        TraceStep(120_120, listOf("DONE:5")),
-        TraceStep(120_160, listOf("MOVE:5>6")),   // blender2 -> packaging swipe; the strip mover
-                                                  // is long free by now, so this is not delayed
-        TraceStep(135_160, listOf("RUN:6")),      // packaging runs once both blenders are in
-        TraceStep(155_160, listOf("DONE:6")),
-        TraceStep(155_200, listOf("LOT:DONE")),
-    )
-
-    /** Sequence 4 — the liquid line with a single vessel. Exercises slots 7..11. */
-    val SEQ4: List<TraceStep> = listOf(
-        TraceStep(0, listOf("SEQ:4", "RUN:7", "RUN:8", "RUN:7")),
-        TraceStep(20_000, listOf("DONE:7", "DONE:8")),
-        TraceStep(20_040, listOf("MOVE:7>9")),    // robot, 20 s
-        TraceStep(40_040, listOf("RUN:9")),
-        TraceStep(60_040, listOf("DONE:9")),
-        TraceStep(60_080, listOf("MOVE:9>11")),   // strip swipe, 15 s — no arm
-        TraceStep(75_080, listOf("RUN:11")),
-        TraceStep(95_080, listOf("DONE:11")),
-        TraceStep(95_120, listOf("LOT:DONE")),
-    )
-
-    /** Sequence 5 — two vessels in parallel. Exercises slot 10. */
-    val SEQ5: List<TraceStep> = listOf(
-        TraceStep(0, listOf("SEQ:5", "RUN:7", "RUN:8")),
-        TraceStep(20_000, listOf("DONE:7", "DONE:8")),
-        TraceStep(20_040, listOf("MOVE:7>9")),    // robot
-        TraceStep(40_040, listOf("MOVE:8>10")),   // robot, +20 s
-        TraceStep(60_040, listOf("RUN:9", "RUN:10")),
-        TraceStep(80_040, listOf("DONE:9", "DONE:10")),
-        TraceStep(80_080, listOf("MOVE:9>11")),   // vessel1 -> bottling swipe, 15 s
-        TraceStep(95_080, listOf("MOVE:10>11")),  // vessel2 waits its FIFO turn on the one strip
-                                                  // mover, so it starts as the first one ends
-        TraceStep(110_080, listOf("RUN:11")),
-        TraceStep(130_080, listOf("DONE:11")),
-        TraceStep(130_120, listOf("LOT:DONE")),
+    val SOLID_SEQ1: List<TraceStep> = listOf(
+        TraceStep(0, listOf("SEQ:1", "RUN:2", "RUN:3")),   // Module 2 + 3 running
+        TraceStep(20_000, listOf("DONE:2", "MOVE:2>5")),   // macro ready; robot carries it to the blender
+        TraceStep(64_100, listOf("DONE:3")),               // gravimetric finishes mid-dump
+        TraceStep(74_050, listOf("RUN:5")),                // pour done, arm retracting -> blender runs
+        TraceStep(81_500, listOf("MOVE:3>5")),             // robot carries the gravimetric
+        TraceStep(102_300, listOf("RUN:2")),               // macro recharge complete -> running again
+        TraceStep(107_800, listOf("DONE:5")),              // blender ready to receive
+        TraceStep(135_550, listOf("RUN:5")),               // blender running (both materials in)
+        TraceStep(150_350, listOf("RUN:3")),               // gravimetric recharge complete -> running
+        TraceStep(155_550, listOf("DONE:5")),              // blender ready to ship -> strip flow 14..16
+        TraceStep(168_750, listOf("RUN:6", "DONE:2", "MOVE:2>5")),  // packaging runs; 2nd macro carry
+        TraceStep(212_850, listOf("DONE:3")),
+        TraceStep(222_800, listOf("RUN:5")),
+        TraceStep(230_250, listOf("MOVE:3>5")),            // 2nd gravimetric carry
+        TraceStep(256_550, listOf("DONE:5")),
+        TraceStep(284_300, listOf("RUN:5")),               // packaging finishing
+        TraceStep(304_300, listOf("DONE:6")),              // packaging done -> strip flow 17..21 (output)
+        TraceStep(313_700, listOf("LOT:DONE")),            // one cycle shipped
+        TraceStep(316_700, listOf("RUN:2", "RUN:3")),      // next cycle begins — NB no SEQ:1
     )
 
     /**
@@ -102,10 +80,7 @@ object WireTrace {
     )
 
     val ALL: Map<String, List<TraceStep>> = linkedMapOf(
-        "Sequence 1 — bottleneck" to SEQ1,
-        "Sequence 2 — two blenders" to SEQ2,
-        "Sequence 4 — liquid, one vessel" to SEQ4,
-        "Sequence 5 — liquid, two vessels" to SEQ5,
+        "Solid Sequence 1" to SOLID_SEQ1,
         "Malformed input" to HOSTILE,
     )
 }

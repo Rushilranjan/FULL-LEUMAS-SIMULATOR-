@@ -1105,3 +1105,19 @@ Treat it as a **small deterministic production-process state machine with concur
 The physical hardware mapping is already fixed.
 
 Your job is to implement the sequence on top of the existing architecture, not redesign the system.
+
+
+10) sequence 1 changes after trial run:
+
+1) make each module run for 20 seconds in each state( they run for 10 seconds in each state rn ig)
+2) the time I tell always doesn't match with actual time, like if I say make a module run for 10 secs it only runs for 5 seconds in reality
+3) the led strip animation changes: 
+   recharge animation: for module 2: -led indices is from 0-5 
+                                     - lets not use swipe animation, instead 0 solid 1 solid....4 solid 5 solid, then all 1ST LED ON for 1st time, till 3rd led on till 2nd time then all for 3rd time 
+repeat 3 times and once recharge animation is complete turn the leds off don't keep them on 
+    recharge animation for module 3: -led indices is from 0-9 
+                                     - same animation as module 2 but increase the speed as compared to module 2 as we have double the led and it shouldn't look like its taking too much time ,make sure the time is slightly more than module 2 recharge 
+4) the sequence doesn't seem to be coordinationg with each module, like modules light up there states before robot arrives or turn of before robot left,or start running before actual material had to be transferred to them pls cnfirm the process to me before coding .
+add significant amount of delays/time between each module to make everything work perfectly.
+
+5)do deep root cause analysis make everything work perfectly and very smoothly along with the robot.
