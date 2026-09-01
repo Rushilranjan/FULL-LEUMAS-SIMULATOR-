@@ -219,12 +219,14 @@ extern const SlotLeds SLOT_LEDS[MODULE_COUNT];
  * centre and the audience waits on a colour change. Shortened to 12 s, which
  * still reads clearly from across a room but stops the board-only phases
  * dominating the cycle. */
-/* Change 16.4: was 12 s. The blender is now dark while it holds the first
- * material and only goes blue when the second pour lands, so this is the entire
- * time it spends blue -- it is no longer a window the audience waits through,
- * it IS the blend. Short and purposeful: blue, then green, then the 14..16 flow
- * starts on the same pass with nothing in between. */
-#define SS1_BLEND_RUN_MS          8000u
+/* How long a blender stays blue once it has everything it needs.
+ *
+ * Change 16.4 made this the ENTIRE time it spends blue -- it is dark while it
+ * merely holds a partial batch -- so this is not a window the audience waits
+ * through, it IS the blend. Change 21 then set a floor: every pour must leave
+ * the module lit for at least ten seconds, long enough to be certain it lit at
+ * all, before it goes green and the hand-off flow starts on the same pass. */
+#define SS1_BLEND_RUN_MS         10000u
 /* How long packaging takes to finish after the last material reaches it.
  * Change 11.3: was 20 s, same reasoning as the blender above. */
 #define SS1_PACKAGING_FINISH_MS  12000u
@@ -309,11 +311,15 @@ extern const SlotLeds SLOT_LEDS[MODULE_COUNT];
  * downstream shifts. */
 #define SS1_COLLECT_OFF_LEAD_MS      0u
 
-/* Change 17.4: how long a module shows blue to acknowledge material landing in
- * it, before going dark again to wait for the rest of the batch. Long enough to
- * read as "that went in", short enough not to become the stale lit module that
- * change 16.4 removed. */
-#define SS1_RECEIVE_ACK_MS        5000u
+/* How long a module shows blue to acknowledge material landing in it, before
+ * going dark again to wait for the rest of the batch.
+ *
+ * Change 21 raised this 5 s -> 10 s, matching SS1_BLEND_RUN_MS: the requirement
+ * is that a dump ALWAYS leaves the receiving module blue for at least ten
+ * seconds, whether or not that pour completes the batch. Still far short of the
+ * 42 s carry, so it cannot become the stale lit module change 16.4 removed --
+ * the module is dark again long before the next pour arrives. */
+#define SS1_RECEIVE_ACK_MS       10000u
 
 /* Emit RUN:/DONE: module cues to the Android robot as well as the four MOVE:
  * cues per cycle. Set to 0 for MOVE-only if the app would rather not see them.

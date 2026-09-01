@@ -45,10 +45,11 @@ packaged, and put out on the exit strip. Two robot carries, one blender batch, o
 3. **Robot collects the gravimetric material** and dumps it into the blender. That dump starts the
    gravimetric's own recharge on pixels 0-9. When either recharge finishes, its module goes blue and
    starts producing again.
-4. **Blender → Packaging.** No robot movement. The blender shows blue for 2 s to acknowledge each
-   pour; after the first it goes dark again, having only half a batch and nothing to do (change
-   16.4), and after the second it stays blue and **blends** for 8 s. Then it goes green and material
-   flows along pixels **14-16**, three times. The blender then goes dark.
+4. **Blender → Packaging.** No robot movement. Every pour leaves the blender blue for at least
+   **10 s** (change 21). After the first that is only an acknowledgement — it has half a batch and
+   nothing to do — so it goes dark again (change 16.4); after the second the blue simply stays on,
+   because it is now genuinely **blending**. Then it goes green and material flows along pixels
+   **14-16**, three times, and the blender goes dark.
 5. **Packaging → output.** Packaging goes blue on receiving, finishes the lot, goes green, and puts
    it out along pixels **17-21**, three times. `LOT:DONE` goes out and the cycle counter ticks over.
 
@@ -570,8 +571,10 @@ void HAL_TIM_ErrorCallback(TIM_HandleTypeDef *htim)     { app_on_tim_error(htim)
   it. A cycle is one lot and lots ship 84 s apart, so the run is `138 + 84 x (SS1_CYCLES - 1)`
   seconds: four cycles is ~6 min 30 s, two is ~3 min 42 s, eight is ~13 min.
 - **Fixed durations** — `SS1_INITIAL_PROCESS_MS` (20 s, both feeders producing at the start) is
-  pinned by the requirement. `SS1_BLEND_RUN_MS` (8 s) and `SS1_PACKAGING_FINISH_MS` (12 s) may be
-  retuned freely. `SS1_COLLECTION_MS` and `SS1_DUMP_MS` are **gone** as of change 17.6: the arm's
+  pinned by the requirement. `SS1_BLEND_RUN_MS` (10 s) and `SS1_RECEIVE_ACK_MS` (10 s) are the
+  floor change 21 asks for — a dump must leave the receiving module blue for at least ten seconds,
+  whichever of the two applies — so lower them together or not at all.
+  `SS1_PACKAGING_FINISH_MS` (12 s) may be retuned freely. `SS1_COLLECTION_MS` and `SS1_DUMP_MS` are **gone** as of change 17.6: the arm's
   dwells are `SS1_ARM_PICK_MS` and `SS1_ARM_PLACE_MS`, 7.4 s each, and they come straight from the
   app's `RobotPhase` fractions. Lengthening the stand-and-collect means editing those fractions in
   the app first and mirroring them here — doing it on the board alone is exactly what put the two
