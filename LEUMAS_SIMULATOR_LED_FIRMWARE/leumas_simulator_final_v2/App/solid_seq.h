@@ -27,6 +27,12 @@
  *                gravimetric is collected TWICE per cycle and has to recharge
  *                in between, which is the tightest timing in the whole demo.
  *
+ *   SEQUENCE 3   the LIQUID line: liquid macro -> vessel -> bottling, and out
+ *                on the liquid exit run. ONE carry per cycle, so the single
+ *                feeder is collected every carry and must recharge and produce
+ *                inside one -- which is what forced the recharge to start when
+ *                the arm lifts away rather than when it pours (change 23).
+ *
  * Both run SS1_CYCLES cycles and then park. Neither ever starts another.
  *
  * ---------------------------------------------------------------------------
@@ -82,7 +88,7 @@
 #include <stdbool.h>
 
 /* How many sequences the board knows. Selection cycles through 1..this. */
-#define SOLID_SEQ_COUNT   2u
+#define SOLID_SEQ_COUNT   3u
 
 typedef enum {
     SS1_IDLE = 0,    /* never started, or stopped                             */

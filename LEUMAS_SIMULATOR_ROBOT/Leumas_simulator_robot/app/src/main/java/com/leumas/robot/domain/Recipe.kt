@@ -22,9 +22,9 @@ data class RecipeStage(
  * MCU stays the sole source of truth for *when* anything happens.
  *
  * Mirrors `App/solid_seq.c` and the `SS1_*` constants in `Core/Inc/config.h`. Change 20 turned
- * that file into a small engine driven by a per-sequence table, so there are two solid sequences
- * again and the board button cycles between them. The liquid line still has none: its slot map is
- * in the firmware config awaiting one, and its recipe belongs here when it lands.
+ * that file into a small engine driven by a per-sequence table, so there are three sequences and
+ * the board button cycles between them: two on the solid line, and one on the liquid line since
+ * change 23.
  */
 data class Recipe(
     val sequence: Int,
@@ -75,6 +75,21 @@ data class Recipe(
             RecipeStage("PACKAGING", listOf(6)),
         )
 
+        /**
+         * Sequence 3 is not solid at all: it is the LIQUID line, and the only sequence that leaves
+         * on the liquid exit run.
+         *
+         * One dose from the liquid macro fills the vessel -- a batch here is a single dose, not a
+         * blend of two -- and the vessel feeds bottling. One carry per cycle, which makes it the
+         * shortest of the three and the only one where the arm returns to the same module every
+         * time.
+         */
+        private val SS3_STAGES = listOf(
+            RecipeStage("LIQUID MACRO", listOf(7)),
+            RecipeStage("VESSEL", listOf(9)),
+            RecipeStage("BOTTLING", listOf(11)),
+        )
+
         val ALL: Map<Int, Recipe> = linkedMapOf(
             1 to Recipe(
                 sequence = 1,
@@ -94,12 +109,21 @@ data class Recipe(
                 stages = SS2_STAGES,
                 activeSlots = listOf(1, 2, 3, 4, 5, 6),
             ),
+            3 to Recipe(
+                sequence = 3,
+                name = "LIQUID SEQUENCE 3",
+                lesson = "Four cycles on the liquid line: one dose from the liquid macro fills " +
+                    "the vessel, which feeds bottling and ships out on the liquid exit run.",
+                line = ProductionLine.LIQUID,
+                stages = SS3_STAGES,
+                activeSlots = listOf(7, 9, 11),
+            ),
         )
 
         /**
          * Recipe for a sequence number, or null if the MCU announced one we do not know.
          *
-         * Sequences 1 and 2 exist in the firmware; the board button cycles between them and
+         * Sequences 1, 2 and 3 exist in the firmware; the board button cycles between them and
          * announces the choice with `RECIPE:<n>`. An unknown number is shown as-is elsewhere
          * rather than discarded, but there is no card to draw for it.
          */

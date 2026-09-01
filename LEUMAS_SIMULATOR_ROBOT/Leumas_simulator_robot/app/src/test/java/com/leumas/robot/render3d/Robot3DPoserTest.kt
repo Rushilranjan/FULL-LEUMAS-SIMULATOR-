@@ -123,35 +123,36 @@ class Robot3DPoserTest {
     }
 
     /**
-     * Yaw must vary smoothly and monotonically along an edge, never step between fixed facings.
+     * The machine is never seen face-on, anywhere along an edge.
      *
-     * The flat middle used to be flat at **zero** — the carriage parked directly under the module
-     * and the base had nothing to make up. Change 16.5 ended that: the machine must never show its
-     * face to the audience, so the carriage now stands off along the rail and the flat middle sits
-     * at a steady profile angle instead. Everything else about this test is unchanged, and the
-     * monotonic/continuous assertions below are the ones that caught the first attempt at 16.5,
-     * which flipped the standoff side at rail centre and snapped the turret ~120 degrees.
+     * This test used to demand smooth continuity in the calibration point, and change 23 had to
+     * give that up. The two properties are incompatible: yaw must change sign along an edge -- the
+     * two ends mirror each other -- and if it may never be small it cannot pass through zero, so it
+     * has to jump. Change 16.5 kept continuity and paid for it with a zero crossing at
+     * targetX = -1.45, where a module was serviced dead face-on. The requirement is the angle, so
+     * the angle is what is asserted now.
+     *
+     * Continuity still holds either side of rail centre, and that is checked: the jump is ONE step,
+     * in one place, not a turret that snaps about wherever the point moves.
      */
     @Test
-    fun `yaw varies continuously and monotonically along an edge`() {
-        var previous = Arena3D.yawFor(EdgePoint(ArenaEdge.TOP, 0f))
-        for (i in 1..200) {
+    fun `the base is never near face-on anywhere along an edge`() {
+        var previous: Float? = null
+        var jumps = 0
+        for (i in 0..200) {
             val yaw = Arena3D.yawFor(EdgePoint(ArenaEdge.TOP, i / 200f))
-            assertTrue("yaw stepped at $i: $previous -> $yaw", abs(yaw - previous) < 0.10f)
-            assertTrue("yaw went backwards at $i: $previous -> $yaw", yaw >= previous - 1e-5f)
+            assertTrue(
+                "face-on at $i: $yaw",
+                abs(yaw) >= Arena3D.MIN_SERVICE_YAW - 1e-3f,
+            )
+            previous?.let { if (abs(yaw - it) > 0.10f) jumps++ }
             previous = yaw
         }
-        // Left end turns one way, right end the other...
-        assertTrue(Arena3D.yawFor(EdgePoint(ArenaEdge.TOP, 0f)) < -0.20f)
-        assertTrue(Arena3D.yawFor(EdgePoint(ArenaEdge.TOP, 1f)) > 0.20f)
+        assertEquals("yaw should change facing exactly once", 1, jumps)
 
-        // ...and the middle, which used to be dead-on to the camera, is now held in profile
-        // (change 16.5). This is the assertion that stops the face-on pose coming back.
-        assertEquals(
-            Arena3D.MIN_SERVICE_YAW,
-            Arena3D.yawFor(EdgePoint(ArenaEdge.TOP, 0.5f)),
-            1e-3f,
-        )
+        // Left end turns one way, right end the other, and both are full profile.
+        assertEquals(-Arena3D.MIN_SERVICE_YAW, Arena3D.yawFor(EdgePoint(ArenaEdge.TOP, 0f)), 1e-3f)
+        assertEquals(Arena3D.MIN_SERVICE_YAW, Arena3D.yawFor(EdgePoint(ArenaEdge.TOP, 1f)), 1e-3f)
     }
 
     /** Every calibrated point must stay inside the arm's envelope, corners included. */

@@ -104,13 +104,22 @@ extern const SlotLeds SLOT_LEDS[MODULE_COUNT];
 #define SS1_SLOT_BLENDER       4u   /* "Module 5" — Blender2,    px 61-62 */
 #define SS1_SLOT_PACKAGING     5u   /* "Module 6" — Packaging,   px 76-77 */
 
+/* The liquid line. Sequence 3 runs one macro, one vessel and the bottling
+ * module along it; the rest are mapped and waiting for a sequence of their
+ * own. */
+#define SS1_SLOT_LMACRO1       6u   /* LMacro1,   px 85-87, status 22-26  */
+#define SS1_SLOT_VESSEL1       8u   /* Vessel1,   px 70-71, status 22-33  */
+#define SS1_SLOT_BOTTLING     10u   /* Bottling,  px 73-74, status 22-38  */
+
 /* Everything else on the board is dark for the whole run. */
 /* Every solid-line module a sequence may light. Sequence 1 uses four of these
  * and sequence 2 uses all six; the mask is the union, because it exists to keep
  * the LIQUID line dark rather than to describe any one sequence. */
 #define SS1_ACTIVE_MASK   ( (1u << SS1_SLOT_MACRO1)   | (1u << SS1_SLOT_MACRO)        | \
                             (1u << SS1_SLOT_GRAVIMETRIC) | (1u << SS1_SLOT_BLENDER1)  | \
-                            (1u << SS1_SLOT_BLENDER) | (1u << SS1_SLOT_PACKAGING) )
+                            (1u << SS1_SLOT_BLENDER) | (1u << SS1_SLOT_PACKAGING)     | \
+                            (1u << SS1_SLOT_LMACRO1) | (1u << SS1_SLOT_VESSEL1)       | \
+                            (1u << SS1_SLOT_BOTTLING) )
 
 /* Module pixels are ALWAYS full brightness — the strip percentage above never
  * applies to them. */
@@ -269,6 +278,9 @@ extern const SlotLeds SLOT_LEDS[MODULE_COUNT];
  * the first module on the line has the shortest). A slower per-pixel dwell keeps
  * its recharge from being over before the eye finds it, while still leaving it
  * the quickest of the three, which is what the map says it should be. */
+/* The liquid macro's status run is five pixels (22..26). Paced between the two
+ * solid macros so the three lines read as the same machine. */
+#define SS1_CHARGE_FILL_LIQUID_MS  460u  /* per pixel, 5-pixel span           */
 #define SS1_CHARGE_FILL_MACRO1_MS  700u  /* per pixel, 2-pixel span           */
 #define SS1_CHARGE_FILL_MACRO_MS   420u  /* per pixel, 6-pixel span           */
 /* Change 12.3: eased off from 300 — the gravimetric was reading as a flicker

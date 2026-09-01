@@ -31,8 +31,9 @@
 #define SS1_FLOW_A(from)   (SLOT_LEDS[from].st_end)
 #define SS1_FLOW_B(to)     (SLOT_LEDS[to].st_end)
 
-#define SS1_OUT_A     ((uint8_t)SOLID_EXIT_A)                             /* 17 */
-#define SS1_OUT_B     ((uint8_t)SOLID_EXIT_B)                             /* 21 */
+/* The exit run a lot leaves on. Program data since change 23: the solid line
+ * ships out on 17..21 and the liquid line on 39..43, so this cannot be a
+ * constant any more. */
 
 /* ---- carry timing --------------------------------------------------------
  * A carry is one MOVE cue and then a fixed sequence of moments: the arm
@@ -79,12 +80,8 @@
 /* One flow pass lights its span a pixel at a time, holds the full span for one
  * more step and then blanks; the blank IS the gap before the next pass. So a
  * pass costs len*STEP + BLANK, and the animation is that once per pass. */
-#define SS1_OUT_SPAN_LEN     ( SOLID_EXIT_B - SOLID_EXIT_A + 1u )
-
 #define SS1_FLOW_MS(len, passes)                                              \
     ( (passes) * ( (len) * SS1_FLOW_STEP_MS + SS1_FLOW_BLANK_MS ) )
-
-#define SS1_OUT_FLOW_MS   SS1_FLOW_MS(SS1_OUT_SPAN_LEN, SS1_FLOW_OUTPUT_PASSES)
 
 /* The board and the Android arm are two open-loop clocks with no handshake
  * between them, so these are the numbers that must be identical on both sides.
@@ -276,6 +273,7 @@ typedef struct {
     uint8_t               carries_per_cycle;
     uint8_t               pack_slot;
     uint8_t               pack_needs;   /* blender batches per lot           */
+    uint8_t               out_a, out_b; /* the exit run a lot leaves on      */
 } Ss1Program;
 
 /* ---- sequence 1: macro + gravimetric -> blender 2 -> packaging ----------- */
@@ -318,6 +316,25 @@ static const Ss1CarrySpec SEQ2_CARRIES[] = {
     { 2u, 1u },   /* gravimetric -> blender 2 */
 };
 
+/* ---- sequence 3: the liquid line ----------------------------------------
+ * One macro, one vessel, one bottling module, out on the liquid exit run.
+ *
+ * ONE carry per cycle, which makes this the only sequence where a feeder is
+ * collected on EVERY carry -- and that is what exposed two gaps the solid
+ * sequences never could. Its release cue for the next carry arrives while it is
+ * still refilling for that same carry (hence Ss1Feeder.release_pending), and it
+ * has one carry rather than two to recharge and produce in (hence the recharge
+ * moving to the moment the arm lifts away, change 23). */
+static const Ss1FeederSpec SEQ3_FEEDERS[] = {
+    { SS1_SLOT_LMACRO1, SS1_CHARGE_FILL_LIQUID_MS },
+};
+static const Ss1BlenderSpec SEQ3_BLENDERS[] = {
+    { SS1_SLOT_VESSEL1, 1u },   /* one dose is a batch */
+};
+static const Ss1CarrySpec SEQ3_CARRIES[] = {
+    { 0u, 0u },   /* liquid macro -> vessel */
+};
+
 static const Ss1Program SS_PROGRAMS[SOLID_SEQ_COUNT] = {
     {
         .number = 1u,
@@ -325,6 +342,7 @@ static const Ss1Program SS_PROGRAMS[SOLID_SEQ_COUNT] = {
         .blenders = SEQ1_BLENDERS, .blender_count = 1u,
         .carries = SEQ1_CARRIES,   .carries_per_cycle = 2u,
         .pack_slot = SS1_SLOT_PACKAGING, .pack_needs = 1u,
+        .out_a = SOLID_EXIT_A, .out_b = SOLID_EXIT_B,
     },
     {
         .number = 2u,
@@ -332,6 +350,15 @@ static const Ss1Program SS_PROGRAMS[SOLID_SEQ_COUNT] = {
         .blenders = SEQ2_BLENDERS, .blender_count = 2u,
         .carries = SEQ2_CARRIES,   .carries_per_cycle = 4u,
         .pack_slot = SS1_SLOT_PACKAGING, .pack_needs = 2u,
+        .out_a = SOLID_EXIT_A, .out_b = SOLID_EXIT_B,
+    },
+    {
+        .number = 3u,
+        .feeders = SEQ3_FEEDERS,   .feeder_count  = 1u,
+        .blenders = SEQ3_BLENDERS, .blender_count = 1u,
+        .carries = SEQ3_CARRIES,   .carries_per_cycle = 1u,
+        .pack_slot = SS1_SLOT_BOTTLING, .pack_needs = 1u,
+        .out_a = LIQUID_EXIT_A, .out_b = LIQUID_EXIT_B,
     },
 };
 
@@ -352,6 +379,12 @@ typedef struct {
     uint8_t   slot;
     uint8_t   span_a, span_b;
     uint16_t  fill_ms;
+    /* Change 23: its release cue arrived while it was still recharging or
+     * producing, so it goes green the moment it is ready instead of losing the
+     * cue. A sequence with ONE feeder collects it every carry, so the cue for
+     * the next carry always lands before the feeder has finished refilling for
+     * it -- see feeder_release(). */
+    bool      release_pending;
     SoftTimer t;
 } Ss1Feeder;
 
@@ -614,6 +647,7 @@ static void feeder_init(Ss1Feeder *f, const Ss1FeederSpec *spec)
     f->span_a  = SS1_SPAN_A(spec->slot);
     f->span_b  = SS1_SPAN_B(spec->slot);
     f->fill_ms = spec->fill_ms;
+    f->release_pending = false;
     timer_stop(&f->t);
 }
 
@@ -649,7 +683,17 @@ static void feeder_release(Ss1Feeder *f)
 {
     if (f->phase == FD_HELD) {
         feeder_ready(f);
+        return;
     }
+    /* Change 23: not ready yet, so remember the cue instead of dropping it.
+     *
+     * The solid sequences never needed this -- a feeder there is collected every
+     * second or fourth carry, so it has always finished producing by the time
+     * its cue arrives. Sequence 3 has one feeder and one carry per cycle, so the
+     * cue for the next carry lands while it is still refilling FOR that carry,
+     * and a one-shot release would be lost: the module would sit blue for the
+     * rest of the run and the arm would collect from it dark. */
+    f->release_pending = true;
 }
 
 /* Change 11.4: the recharge starts the moment the material this feeder supplied
@@ -690,6 +734,10 @@ static void feeder_tick(Ss1Feeder *f)
     case FD_PRODUCING:
         if (timer_expired(&f->t)) {
             f->phase = FD_HELD;      /* blue, awaiting its release cue */
+            if (f->release_pending) {
+                f->release_pending = false;
+                feeder_ready(f);     /* the cue got here first (change 23) */
+            }
         }
         break;
 
@@ -756,7 +804,7 @@ static void packaging_tick(void)
     case PK_FINISHING:
         if (timer_expired(&s_pack_timer)) {
             set_mod(s_prog->pack_slot, MOD_READY);
-            ss1_flow_start(&s_flow_out, SS1_OUT_A, SS1_OUT_B,
+            ss1_flow_start(&s_flow_out, s_prog->out_a, s_prog->out_b,
                            SS1_FLOW_OUTPUT_PASSES);
             s_pack = PK_SHIPPING;
         }
@@ -1000,6 +1048,25 @@ static void enter_step(Ss1Step s)
      * been collected, which is the moment the arm lifts away with it. */
     case S_CARRY_CROSS:
         feeder_emptied(carry_source(s_carry));
+        /* Change 23: the recharge starts HERE, the instant the arm lifts away
+         * with the material, rather than later when the arm pours it.
+         *
+         * The module is empty from this moment, so it is free to refill from
+         * this moment -- waiting left it sitting dark and idle for the ~8 s of
+         * the crossing, which is the dead time this demo keeps having to remove.
+         *
+         * It is also what makes sequence 3 possible at all. With one feeder and
+         * one carry per cycle it has a single carry to recharge AND produce in;
+         * starting at the pour left it 3 s short and the arm would have arrived
+         * at a module that was not green yet.
+         *
+         * This supersedes change 11.4, which tied the recharge to "the blender
+         * starts working". That coupling had already been broken by change 16.3
+         * moving the blender's blue to the END of the pour, so the recharge was
+         * no longer coinciding with anything in particular. */
+        if (feeder_used_after(carry_at(s_carry)->feeder, s_carry)) {
+            feeder_recharge(carry_source(s_carry));
+        }
         ms = SS1_T_CROSS_TO_DEST;
         break;
 
@@ -1012,9 +1079,6 @@ static void enter_step(Ss1Step s)
      * module is working and a module being poured into has not started working
      * yet. */
     case S_CARRY_DUMP:
-        if (feeder_used_after(carry_at(s_carry)->feeder, s_carry)) {
-            feeder_recharge(carry_source(s_carry));
-        }
         ms = SS1_T_DUMP_HOLD;
         break;
 

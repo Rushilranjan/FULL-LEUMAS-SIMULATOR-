@@ -154,19 +154,33 @@ object Arena3D {
      * has to turn at least [MIN_SERVICE_YAW] to reach across and the machine is always seen in
      * profile.
      *
-     * The standoff is in **one fixed direction**, and that matters more than it looks. Choosing the
-     * side per module -- stand inboard, reach outward -- is the intuitive version and it is wrong:
-     * the side flips as the target crosses rail centre, so the carriage jumps a full standoff and
-     * the turret snaps through ~120 degrees. That is the same class of fault change 13.3 removed,
-     * and `yaw varies continuously and monotonically along an edge` caught it immediately.
+     * **Change 23 stands it INBOARD of the module** -- toward rail centre -- and reaches outward.
      *
-     * One direction is continuous everywhere. For most of the rail the offset is constant, so yaw
-     * is a steady profile; past the left travel limit the clamp takes over and yaw sweeps smoothly
-     * through to the opposite facing, which is what still lets the two ends of an edge mirror each
-     * other. The rail clamp is also what created the diagonals, and it is untouched.
+     * Change 16.5 used a single fixed direction, on the argument that flipping sides at rail centre
+     * would be discontinuous. That was true but it bought the wrong thing: past the left travel
+     * limit the clamp took over, the offset shrank, and it passed through ZERO at targetX = -1.45.
+     * A module there was serviced dead face-on, and everything from about -1.8 to -1.1 sat under
+     * 45 degrees. That is exactly the "the arm is not sideways" fault, and it was structural.
+     *
+     * You cannot have both properties. Yaw has to change sign somewhere -- the two ends of an edge
+     * mirror each other -- and if it may never be small it cannot pass through zero, so it must
+     * jump. The requirement is that the machine is ALWAYS seen side-on, so the guaranteed angle
+     * wins and the jump is placed at rail centre.
+     *
+     * The jump costs nothing in practice: a module's target is fixed, so within a run the yaw for
+     * any given module never changes, and the poser blends between two modules' facings over the
+     * whole travel phase. Two modules straddling centre make one long smooth 120-degree sweep, not
+     * a snap -- the fault change 13.3 removed was hard-coded facings snapping mid-move, which this
+     * is not.
+     *
+     * Standing inboard also means the clamp never binds: |targetX| tops out at ARENA_HALF_X, so the
+     * carriage tops out at ARENA_HALF_X - SERVICE_STANDOFF, comfortably inside the rail.
      */
-    fun carriageXFor(point: EdgePoint): Float =
-        (worldTargetFor(point).x - SERVICE_STANDOFF).coerceIn(-RAIL_HALF, RAIL_HALF)
+    fun carriageXFor(point: EdgePoint): Float {
+        val targetX = worldTargetFor(point).x
+        val inboard = if (targetX >= 0f) -SERVICE_STANDOFF else SERVICE_STANDOFF
+        return (targetX + inboard).coerceIn(-RAIL_HALF, RAIL_HALF)
+    }
 
     /**
      * Base yaw (radians about +Y) so the arm faces the module. 0 = facing the camera (+Z).
