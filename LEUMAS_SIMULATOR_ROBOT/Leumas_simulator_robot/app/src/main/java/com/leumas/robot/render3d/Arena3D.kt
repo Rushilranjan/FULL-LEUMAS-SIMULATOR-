@@ -49,29 +49,36 @@ object Arena3D {
      * Arm segment lengths in world units. Lower + upper give the vertical reach; the forearm is
      * held horizontal by the parallelogram and adds pure horizontal extension.
      *
-     * **Change 24 lengthened these (0.50/0.42 -> 0.66/0.55) because the arm was too short for its
-     * own workspace.** Measured against the old [MAX_WRIST] of 0.892:
+     * **Change 25 put these back to 0.50/0.42. Do not lengthen them again without moving the
+     * camera first.** Change 24 raised them to 0.66/0.55 to stop the arm reading as a backhoe at
+     * the bottom edge. That worked -- but an arm that reaches further is also an arm that is
+     * BIGGER, and at 0.66/0.55 the machine ran off the edge of the frame. Seeing the whole robot
+     * beats seeing it bend.
+     *
+     * So the digging is back, and it is worth writing down precisely what it is, because every
+     * obvious fix for it has now been tried and rejected. Measured against [MAX_WRIST] = 0.892:
      *
      *     TOP edge      wrist 1.082    121% of envelope    clamped
      *     mid           wrist 0.570     64%                elbow 76 deg
      *     BOTTOM edge   wrist 1.048    117% of envelope    clamped
      *
-     * Both extremes were past the envelope, so [clampToReach] pinned the arm at full extension —
-     * and a fully extended two-link arm IS a straight line. At the bottom that read as a backhoe:
-     * a rigid spar stooping 57 degrees with the forearm jutting out horizontally. It could not
-     * articulate because there was nothing left to articulate with. The top was equally straight;
-     * reaching up just reads as "crane" rather than "digger", so nobody complained.
+     * Both extremes sit past the envelope, so [clampToReach] pins the arm at full extension -- and
+     * a fully extended two-link arm IS a straight line. At the bottom that reads as a rigid spar
+     * stooping 57 degrees. It is not an easing or a damping problem: the arm cannot articulate
+     * because there is nothing left to articulate with.
      *
-     * At 0.66/0.55 the envelope is 1.174 and both ends come inside it — 92% at the top, 89% at the
-     * bottom, elbow around 126 and 120 degrees. The solver actually solves, and the pose is a bent
-     * arm rather than a pointed stick. Nothing else moves: the calibration mapping, [REACH_DEPTH]
-     * and [SERVICE_STANDOFF] are untouched, so the arm still points where the operator calibrated.
+     * Three levers reach it, and only one is still free:
      *
-     * The ratio is kept at roughly 1.2:1 so the machine's proportions are unchanged; it is simply
-     * bigger. If these change again, re-check [STOW] — it is the pose that breaks first.
+     *     lengthen the links      fixes it, overflows the frame     -- change 24, reverted here
+     *     raise [BOTTOM_Y]        re-maps every calibrated point    -- see the note there
+     *     pull the camera back    costs nothing but apparent scale  -- UNTRIED
+     *
+     * The third is the one to try. The eye is set in `SceneRenderer.onDrawFrame`; backing it off
+     * shrinks the whole scene, which buys envelope headroom without touching this geometry or the
+     * operator's calibration. Move the camera first, then lengthen these.
      */
-    const val LOWER_ARM = 0.66f
-    const val UPPER_ARM = 0.55f
+    const val LOWER_ARM = 0.50f
+    const val UPPER_ARM = 0.42f
     const val FOREARM = 0.22f
 
     /**
@@ -102,11 +109,14 @@ object Arena3D {
      * into a Vessel or Bottling played off-screen. At -0.26 the bucket straddles the bottom edge,
      * matching how the side edges already behave.
      *
-     * Change 24 briefly raised this to 0.10 to stop the arm digging at the bottom, and put it back:
-     * this is NOT a bottom-only knob. It is the far end of the vertical lerp in [worldTargetFor]
-     * for *every* edge, so raising it moves the blenders up too and re-maps every calibrated point
-     * — the arm would stop pointing at the real modules. The digging was fixed by lengthening the
-     * arm instead; see [LOWER_ARM].
+     * Change 24 briefly raised this to 0.10 to stop the arm digging at the bottom, and put it
+     * back: this is NOT a bottom-only knob. It is the far end of the vertical lerp in
+     * [worldTargetFor] for *every* edge, so raising it moves the blenders up too and re-maps every
+     * calibrated point -- the arm would stop pointing at the real modules, and the operator's
+     * calibration would be silently invalidated.
+     *
+     * Change 24 lengthened the arm instead; change 25 reverted that too, because it overflowed the
+     * frame. See [LOWER_ARM] for where that leaves the digging and what is left to try.
      */
     const val BOTTOM_Y = -0.26f
 
@@ -153,21 +163,19 @@ object Arena3D {
      * genuinely in front, which is the palletiser's real geometry and reads as a machine at the
      * ready rather than a post.
      *
-     * The old values (0.34, -0.60) and (0.42, -0.36) both failed that test, and so did
-     * (0.72, -0.62) once change 24 lengthened the arm: alpha grows with the links, and that pose
-     * went from 78 degrees to 94 — over the limit, elbow behind the turret, red column. Longer arms
-     * need their parking targets further out, not further down.
+     * The old values (0.34, -0.60) and (0.42, -0.36) both failed that test.
      *
-     *     STOW   (0.72, -0.62) -> (0.95, -0.55)   theta+alpha 94.2 -> 73.6
-     *     CARRY  (0.74, -0.30) -> (0.90, -0.28)   theta+alpha 81.5 -> 68.4
-     *
-     * CARRY was not actually broken at 81.5, but it sat close to the limit with the longer links
-     * and held the payload near the base; 0.90 restores the margin on both counts.
+     * These and the link lengths are a MATCHED SET, because alpha grows with the links. Change 24
+     * moved them out to (0.95, -0.55) and (0.90, -0.28) when it lengthened the arm -- (0.72, -0.62)
+     * went from 78 degrees to 94 on the longer links, over the limit, elbow folded behind the
+     * turret. Change 25 reverted the links, so these revert with them: left at 0.95 with 0.50/0.42
+     * links the parking poses would instead sit near full extension, which is the straight-spar
+     * pose from the other direction.
      */
-    val STOW = Vec2(0.95f, -0.55f)
+    val STOW = Vec2(0.72f, -0.62f)
 
     /** Arm out and a little lowered, holding the payload clear of the base. */
-    val CARRY = Vec2(0.90f, -0.28f)
+    val CARRY = Vec2(0.74f, -0.30f)
 
     /**
      * World position the gripper is aiming for, straight from the normalised calibration point.
