@@ -380,6 +380,21 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
             // Nothing was written, so nothing is coming back. Drop back to READY rather than
             // stranding the operator on a button that will never resolve.
             _startGate.value = StartGate.READY
+            return
+        }
+
+        // A successful write is not a delivered one, and that is not theoretical: on the bench the
+        // very first START after a connect returned true, the app sat on "STARTING", and the board
+        // reported zero bytes received. Somewhere between the GATT queue and the module's UART
+        // bridge it was dropped. Without this the demo is stuck on a dead button with no way back.
+        //
+        // So the gate falls back to READY if the board has not answered, and the operator simply
+        // taps again. Cancelled by the SEQ handler the moment an answer does arrive, which is why
+        // it shares armJob.
+        armJob?.cancel()
+        armJob = viewModelScope.launch {
+            delay(START_ACK_TIMEOUT_MS)
+            if (_startGate.value == StartGate.STARTING) _startGate.value = StartGate.READY
         }
     }
 
@@ -434,6 +449,14 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val MAX_LOG_LINES = 300
+
+        /**
+         * How long to wait for the board to answer a START before offering the button again.
+         *
+         * Long enough that a slow link is not mistaken for a lost byte, short enough that the
+         * operator is not left staring at a dead control in front of an audience.
+         */
+        const val START_ACK_TIMEOUT_MS = 4_000L
 
         /** The one command `App/ble.c` listens for. CRLF, as the firmware terminates its own. */
         val START_COMMAND: ByteArray = "START\r\n".toByteArray()

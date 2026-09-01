@@ -12,12 +12,18 @@ static uint8_t  s_len;
 static bool     s_overflow;      /* this line is already too long to be START  */
 static bool     s_start_pending; /* consumed once by ble_take_start()          */
 
+/* Bench diagnostics; see ble.h. */
+static uint32_t s_rx_bytes;
+static char     s_rx_last[BLE_LINE_MAX + 1];
+
 void ble_init(UART_HandleTypeDef *huart)
 {
     s_uart          = huart;
     s_len           = 0u;
     s_overflow      = false;
     s_start_pending = false;
+    s_rx_bytes      = 0u;
+    s_rx_last[0]    = '\0';
 }
 
 static void ble_send(const char *msg)
@@ -69,6 +75,13 @@ void ble_lot_done(void)                   { ble_send("LOT:DONE\r\n"); }
  * could leave "START" sitting in the tail of the buffer and fire the demo. */
 static void ble_handle_line(void)
 {
+    /* Keep the line for the `ble` console command before it is cleared, so a
+     * mis-framed or unexpected command can be read off the board rather than
+     * guessed at. Truncated lines are recorded as far as they got. */
+    uint8_t keep = (s_len < BLE_LINE_MAX) ? s_len : (uint8_t)BLE_LINE_MAX;
+    memcpy(s_rx_last, s_line, keep);
+    s_rx_last[keep] = '\0';
+
     if (!s_overflow && s_len == 5u && memcmp(s_line, "START", 5u) == 0) {
         s_start_pending = true;
     }
@@ -78,6 +91,7 @@ static void ble_handle_line(void)
 
 static void ble_handle_char(uint8_t c)
 {
+    s_rx_bytes++;
     if (c == '\r' || c == '\n') {
         if (s_len > 0u || s_overflow) {
             ble_handle_line();
@@ -116,3 +130,6 @@ bool ble_take_start(void)
     }
     return false;
 }
+
+uint32_t    ble_rx_bytes(void) { return s_rx_bytes; }
+const char *ble_rx_last(void)  { return s_rx_last; }

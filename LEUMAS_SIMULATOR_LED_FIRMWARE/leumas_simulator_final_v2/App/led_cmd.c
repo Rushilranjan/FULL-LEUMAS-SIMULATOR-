@@ -3,6 +3,7 @@
 #include "led_fx.h"
 #include "seq_leds.h"
 #include "solid_seq1.h"
+#include "ble.h"
 #include "config.h"
 #include <stdio.h>
 #include <string.h>
@@ -625,6 +626,12 @@ static void exec(char *line)
         cmd_speed(argv, argc, true);
     } else if (strcmp(cmd, "seq") == 0) {
         cmd_seq(argv, argc);
+    } else if (strcmp(cmd, "ble") == 0) {
+        /* Did anything the app sent actually get here? See ble.h. */
+        char bb[96];
+        snprintf(bb, sizeof(bb), "BLE rx: %lu bytes, last line: \"%s\"\r\n",
+                 (unsigned long)ble_rx_bytes(), ble_rx_last());
+        out(bb);
     } else if (strcmp(cmd, "stop") == 0) {
         /* The one command that makes everything hold still — including a
          * running sequence, so there is always a way out. */

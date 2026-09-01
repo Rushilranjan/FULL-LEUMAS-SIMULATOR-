@@ -48,4 +48,17 @@ void ble_poll(void);
  * button_poll(). Anything else on the line is ignored. */
 bool ble_take_start(void);
 
+/* ---- bench diagnostics ---------------------------------------------------
+ * The `ble` console command reports these. They answer the one question this
+ * link will keep raising now that it is no longer transmit-only: did anything
+ * the app sent actually reach the board?
+ *
+ * A zero byte count with the app showing "STARTING" means nothing arrived at
+ * USART6 at all, which is a wiring or module-configuration fault, not a
+ * firmware one -- the BT05's TX has to be on PC7 for any of this to work, and
+ * the original link only ever needed PC6. A non-zero count with no line, or a
+ * line that is not START, is a framing or content problem and is ours. */
+uint32_t    ble_rx_bytes(void);
+const char *ble_rx_last(void);   /* last complete line, "" if none yet */
+
 #endif /* APP_BLE_H */
