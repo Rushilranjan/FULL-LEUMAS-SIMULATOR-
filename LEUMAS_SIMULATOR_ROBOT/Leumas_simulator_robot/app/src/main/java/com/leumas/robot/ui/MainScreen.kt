@@ -56,6 +56,7 @@ fun MainScreen(viewModel: RobotViewModel) {
     val gattTree by viewModel.gattTree.collectAsState()
     val taskCardDimmed by viewModel.taskCardDimmed.collectAsState()
     val sequenceIntro by viewModel.sequenceIntro.collectAsState()
+    val startGate by viewModel.startGate.collectAsState()
     val panelsDimmed by viewModel.panelsDimmed.collectAsState()
 
     var panelsOpen by rememberSaveable { mutableStateOf(true) }
@@ -219,6 +220,22 @@ fun MainScreen(viewModel: RobotViewModel) {
         // so nothing overlaps them, and non-interactive — the arena keeps running underneath.
         sequenceIntro?.let { intro ->
             SequenceIntroOverlay(intro = intro, modifier = Modifier.fillMaxSize())
+        }
+
+        // Change 16.1: the gate. Drawn above the intro because it succeeds it -- the recipe card
+        // fades, this arrives, and nothing on the rig has lit up yet. It is the only control on
+        // screen at that moment, so it sits dead centre rather than in a corner with the HUD.
+        val startState = when (startGate) {
+            StartGate.READY -> StartButtonState.OFFERED
+            StartGate.STARTING -> StartButtonState.WAITING
+            else -> null
+        }
+        startState?.let { state ->
+            StartButton(
+                state = state,
+                onStart = viewModel::requestStart,
+                modifier = Modifier.align(Alignment.Center),
+            )
         }
     }
 }

@@ -125,10 +125,12 @@ class Robot3DPoserTest {
     /**
      * Yaw must vary smoothly and monotonically along an edge, never step between fixed facings.
      *
-     * Note the deliberate flat middle: while the point is within the rail's travel the carriage
-     * parks directly under it and the base has nothing to make up, so yaw is genuinely 0 there. The
-     * turn only appears once the module is further out than the rail can reach — which is the
-     * physically correct behaviour, and is exactly the range the corners live in.
+     * The flat middle used to be flat at **zero** — the carriage parked directly under the module
+     * and the base had nothing to make up. Change 16.5 ended that: the machine must never show its
+     * face to the audience, so the carriage now stands off along the rail and the flat middle sits
+     * at a steady profile angle instead. Everything else about this test is unchanged, and the
+     * monotonic/continuous assertions below are the ones that caught the first attempt at 16.5,
+     * which flipped the standoff side at rail centre and snapped the turret ~120 degrees.
      */
     @Test
     fun `yaw varies continuously and monotonically along an edge`() {
@@ -139,10 +141,17 @@ class Robot3DPoserTest {
             assertTrue("yaw went backwards at $i: $previous -> $yaw", yaw >= previous - 1e-5f)
             previous = yaw
         }
-        // Left end turns one way, right end the other, and the middle is straight ahead.
+        // Left end turns one way, right end the other...
         assertTrue(Arena3D.yawFor(EdgePoint(ArenaEdge.TOP, 0f)) < -0.20f)
         assertTrue(Arena3D.yawFor(EdgePoint(ArenaEdge.TOP, 1f)) > 0.20f)
-        assertEquals(0f, Arena3D.yawFor(EdgePoint(ArenaEdge.TOP, 0.5f)), 1e-4f)
+
+        // ...and the middle, which used to be dead-on to the camera, is now held in profile
+        // (change 16.5). This is the assertion that stops the face-on pose coming back.
+        assertEquals(
+            Arena3D.MIN_SERVICE_YAW,
+            Arena3D.yawFor(EdgePoint(ArenaEdge.TOP, 0.5f)),
+            1e-3f,
+        )
     }
 
     /** Every calibrated point must stay inside the arm's envelope, corners included. */

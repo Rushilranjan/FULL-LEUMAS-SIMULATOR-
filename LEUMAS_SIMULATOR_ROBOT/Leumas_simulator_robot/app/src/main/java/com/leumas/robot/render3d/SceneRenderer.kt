@@ -366,6 +366,13 @@ class SceneRenderer(
      * and a powered dispenser underneath. Because it is fed by a pump it never tips, which is also
      * why [Payload.tilt] is gone.
      *
+     * **Change 16.6 finished the job.** 15.1 kept two bracket rods between the wrist and the vessel
+     * flange, and with daylight between them they still read as a carry handle — the bucket the
+     * change was supposed to abolish, hung from a yoke. The mount is now a single continuous body:
+     * actuator, bearing race, tapered neck, flange, all on one axis with no gap anywhere. The head
+     * is not carried by the arm, it is part of it, which is how a real dosing end effector is
+     * built and the only way it reads as one from every angle the turret swings through.
+     *
      * The dispenser is chosen by material, because one mechanism cannot honestly do both:
      *
      *  - **Liquid** gets a true peristaltic head — a circular race, a three-roller rotor, and
@@ -394,18 +401,44 @@ class SceneRenderer(
         val bottom = add(top, scale(down, VESSEL_HEIGHT))
         val hopperTip = add(bottom, scale(down, HOPPER_HEIGHT))
 
-        // -- mount: wrist actuator, then a rigid bracket down onto the vessel flange ---------------
+        // -- mount: one continuous machined neck from the wrist into the vessel --------------------
+        //
+        // Change 16.6 removed the two bracket struts. They read as a carry handle -- a pail slung
+        // under the tool on a pair of rods, with daylight between the two -- which is exactly the
+        // bucket the vessel was meant to stop being. A dosing head on a real arm is not *carried*
+        // by the wrist, it IS the wrist: one machined body, flange to flange, nothing hanging.
+        //
+        // So the mount is now solid and continuous. The wrist actuator seats a collar, the collar
+        // tapers into the vessel flange, and every section shares the same axis with no gap
+        // between them, so from any angle the tool reads as one part rather than an assembly.
 
+        // Wrist actuator housing: the driven joint the whole head is keyed to.
         modelAt(gripper, 0.10f, 0.10f, 0.10f)
         program.setModel(model, 0.17f, 0.17f, 0.18f, specular = 0.35f, shininess = 30f)
         box.draw(program)
 
-        // Two bracket plates, so the vessel is visibly carried rather than floating under the tool.
+        // Bearing race under the actuator -- the surface the head rotates on.
+        val raceTop = add(gripper, scale(down, 0.030f))
+        val raceBottom = add(raceTop, scale(down, 0.016f))
+        cylinderBetween3(raceTop, raceBottom, radius = NECK_RADIUS * 1.22f)
+        program.setModel(model, 0.30f, 0.32f, 0.35f, specular = 0.75f, shininess = 70f, rim = 0.5f)
+        cyl.draw(program)
+
+        // The neck itself, tapering race -> flange. This is the piece that used to be two rods and
+        // a gap; being a single frustum is the whole point of the change.
+        frustumBetween(add(top, scale(axis, 0.004f)), raceBottom, radius = VESSEL_RADIUS * 1.12f)
+        program.setModel(model, 0.26f, 0.28f, 0.31f, specular = 0.72f, shininess = 62f, rim = 0.6f)
+        hopper.draw(program)
+
+        // A pair of raised ribs up the neck. Detail rather than structure -- they make the taper
+        // read as machined stock instead of a smooth cone, and they are on the body, so they add
+        // nothing to lift and cannot be mistaken for a handle.
         listOf(-1f, 1f).forEach { sgn ->
-            val root = add(gripper, scale(side, sgn * 0.036f))
-            val foot = add(add(top, scale(side, sgn * VESSEL_RADIUS * 0.92f)), scale(axis, 0.012f))
-            cylinderBetween3(root, foot, radius = 0.014f)
-            program.setModel(model, 0.22f, 0.23f, 0.26f, specular = 0.5f, shininess = 44f)
+            val ribOut = normalize(add(scale(side, sgn), scale(out, sgn * 0.35f)))
+            val ribTop = add(add(raceBottom, scale(ribOut, NECK_RADIUS * 0.86f)), scale(down, 0.004f))
+            val ribFoot = add(add(top, scale(ribOut, VESSEL_RADIUS * 0.94f)), scale(axis, 0.008f))
+            cylinderBetween3(ribTop, ribFoot, radius = 0.0075f)
+            program.setModel(model, 0.38f, 0.40f, 0.44f, specular = 0.85f, shininess = 76f, rim = 0.7f)
             cyl.draw(program)
         }
 
@@ -969,7 +1002,12 @@ class SceneRenderer(
 
         const val VESSEL_RADIUS = 0.075f
         const val VESSEL_HEIGHT = 0.110f
-        const val VESSEL_DROP = 0.085f
+        /** Wrist to vessel flange. Change 16.6: tightened from 0.085 so the neck is a short
+         * machined section rather than a span the eye reads as a gap the vessel hangs across. */
+        const val VESSEL_DROP = 0.062f
+
+        /** Radius of the neck joining the wrist race to the vessel flange (change 16.6). */
+        const val NECK_RADIUS = 0.040f
         const val HOPPER_HEIGHT = 0.045f
 
         // Screw auger, for dosing powder.

@@ -5,6 +5,7 @@ import com.leumas.robot.render.Vec2
 import com.leumas.robot.render.lerp
 import kotlin.math.atan2
 import kotlin.math.hypot
+import kotlin.math.tan
 
 /**
  * The 3-D workspace: world-space constants and the mapping from a calibrated [EdgePoint] to where
@@ -83,10 +84,34 @@ object Arena3D {
     /**
      * How far in front of the base (toward the camera) the reach plane sits.
      *
-     * Non-zero so the arm works in front of its own turret rather than edge-on, and so a module
-     * directly above the carriage still yields a well-conditioned yaw instead of `atan2(0, 0)`.
+     * Non-zero so the arm works in front of its own turret rather than edge-on. It used to also be
+     * what stopped a module directly above the carriage degenerating into `atan2(0, 0)`; since
+     * change 16.5 the service standoff below guarantees that conditioning instead, and this is back
+     * to being purely about working depth.
      */
     const val REACH_DEPTH = 0.40f
+
+    /**
+     * Smallest angle the base may sit off head-on while servicing a module (change 16.5).
+     *
+     * The requirement is that the machine is **always seen side-on and never shows its face to the
+     * audience**. Yaw 0 is dead-on to the camera, and the carriage used to park directly under its
+     * target — so for any module near the middle of an edge the offset was ~0, the base stayed at
+     * yaw 0, and the whole arm foreshortened into a column pointed at the viewer. That is the
+     * "showing its face" the change is about, and it was structural, not a tuning miss.
+     *
+     * A real rail-mounted arm does not stand in front of its work either; it parks *beside* the
+     * station and reaches across, because standing in front of it is where you cannot see what the
+     * tool is doing. [SERVICE_STANDOFF] is the rail offset that buys this angle, so the fix and the
+     * physical argument are the same thing.
+     *
+     * ~60 degrees. Raise it for a flatter profile; the arm pays for it in reach, since the standoff
+     * adds to the horizontal distance the two-link chain has to cover.
+     */
+    const val MIN_SERVICE_YAW = 1.04f
+
+    /** Rail offset that yields [MIN_SERVICE_YAW] at the reach plane. About 0.68 world units. */
+    val SERVICE_STANDOFF: Float = REACH_DEPTH * tan(MIN_SERVICE_YAW)
 
     /**
      * Parking target: arm raised and held forward.
@@ -123,12 +148,25 @@ object Arena3D {
     /**
      * Where the carriage parks to service a module.
      *
-     * Directly under the target where the rail can get there, clamped to the travel limit otherwise.
-     * The clamp is what creates the diagonals: for a corner module the carriage runs out of rail and
-     * the base has to turn to make up the remaining offset.
+     * **Change 16.5: beside the module, never under it.** The carriage used to park directly under
+     * its target, which left the base at yaw 0 — square to the camera — for every module near the
+     * middle of an edge. Now it stands off along the rail by [SERVICE_STANDOFF], so the base always
+     * has to turn at least [MIN_SERVICE_YAW] to reach across and the machine is always seen in
+     * profile.
+     *
+     * The standoff is in **one fixed direction**, and that matters more than it looks. Choosing the
+     * side per module -- stand inboard, reach outward -- is the intuitive version and it is wrong:
+     * the side flips as the target crosses rail centre, so the carriage jumps a full standoff and
+     * the turret snaps through ~120 degrees. That is the same class of fault change 13.3 removed,
+     * and `yaw varies continuously and monotonically along an edge` caught it immediately.
+     *
+     * One direction is continuous everywhere. For most of the rail the offset is constant, so yaw
+     * is a steady profile; past the left travel limit the clamp takes over and yaw sweeps smoothly
+     * through to the opposite facing, which is what still lets the two ends of an edge mirror each
+     * other. The rail clamp is also what created the diagonals, and it is untouched.
      */
     fun carriageXFor(point: EdgePoint): Float =
-        worldTargetFor(point).x.coerceIn(-RAIL_HALF, RAIL_HALF)
+        (worldTargetFor(point).x - SERVICE_STANDOFF).coerceIn(-RAIL_HALF, RAIL_HALF)
 
     /**
      * Base yaw (radians about +Y) so the arm faces the module. 0 = facing the camera (+Z).

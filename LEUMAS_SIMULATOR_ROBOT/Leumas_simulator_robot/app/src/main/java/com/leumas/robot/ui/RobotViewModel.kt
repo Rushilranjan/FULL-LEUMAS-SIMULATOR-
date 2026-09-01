@@ -46,6 +46,30 @@ data class LogLine(
 enum class UiMode { NORMAL, CALIBRATION }
 
 /**
+ * The run-start handshake (change 16.1).
+ *
+ * The board no longer lights up on its own: it waits for a `START` over BLE. So the app owns the
+ * opening beat -- show the recipe, offer the button, ask -- and only then does anything happen on
+ * the rig. [RUNNING] is reached the moment `SEQ:<n>` comes back, whoever asked for it.
+ */
+enum class StartGate {
+    /** No link, or nothing to start. Nothing is drawn. */
+    IDLE,
+
+    /** Recipe card is playing. The button is not offered yet -- let the operator read it. */
+    ARMING,
+
+    /** Recipe has been shown; the run is waiting on the operator. */
+    READY,
+
+    /** START has gone out; waiting for the board to answer. */
+    STARTING,
+
+    /** The board is running. */
+    RUNNING,
+}
+
+/**
  * Wires the BLE link, protocol parsing, plant state and animation together.
  *
  * The rule that shapes everything here: Android never originates process state. Bytes arrive,
@@ -58,7 +82,8 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
     private val assembler = LineAssembler()
     private val simulator = SimulatedSource()
 
-    // The ack is a no-op: the firmware has no receive path at all. See TransferAck.
+    // The ack is a no-op. The firmware does have a receive path since change 16.1, but it
+    // listens for START and nothing else -- there is no ARRIVED to send. See TransferAck.
     private val machine = RobotStateMachine(ack = NoOpTransferAck)
     private val poser = RobotPoser()
     private val poser3d = Robot3DPoser()
@@ -114,8 +139,22 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
     private val _sequenceIntro = MutableStateFlow<SequenceIntro?>(null)
     val sequenceIntro: StateFlow<SequenceIntro?> = _sequenceIntro.asStateFlow()
 
+    /**
+     * Where the run-start handshake has got to (change 16.1).
+     *
+     * The rig must stay dark until the operator presses START, so the app now *asks* for the run
+     * instead of narrating one that has already begun. The recipe card is app-side data and never
+     * came from the MCU, which is what makes showing it before the run possible at all.
+     */
+    private val _startGate = MutableStateFlow(StartGate.IDLE)
+    val startGate: StateFlow<StartGate> = _startGate.asStateFlow()
+
     private var demoJob: Job? = null
     private var introJob: Job? = null
+    private var armJob: Job? = null
+
+    /** Set while a demo replay is armed but not yet released by START. */
+    private var pendingDemo: Pair<List<TraceStep>, Float>? = null
     private var lotDoneAtMs: Long = 0L
     private var introCounter: Long = 0L
 
@@ -131,6 +170,13 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
                 // A dropped link must not leave half a line buffered for the next session.
                 if (state is BleConnectionState.Disconnected || state is BleConnectionState.Failed) {
                     assembler.reset()
+                    disarmStart()
+                }
+                // Change 16.1: a live link is the cue to show the recipe and offer START. The
+                // board is sitting dark waiting to be asked, so this is the opening beat of the
+                // whole demo.
+                if (state is BleConnectionState.Connected) {
+                    armStart()
                 }
             }
         }
@@ -156,7 +202,18 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
             machine.abort()
             poser3d.reset()
             lotDoneAtMs = 0L
-            startSequenceIntro(event.sequence)
+
+            // Change 16.1: if we asked for this run, its recipe card has just played and must not
+            // play again -- the board is answering us. If we did not (the board button, or a
+            // console `seq 1`), this is the first we have heard of it and the intro belongs here,
+            // exactly as it always did.
+            if (_startGate.value == StartGate.STARTING) {
+                armJob?.cancel()
+                armJob = null
+            } else {
+                startSequenceIntro(event.sequence)
+            }
+            _startGate.value = StartGate.RUNNING
         }
         if (event is McuEvent.LotDone) lotDoneAtMs = now
         if (event is McuEvent.Move && event.kind == TransferKind.ROBOT) {
@@ -246,9 +303,21 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
     // -- Demo mode -----------------------------------------------------------------------------
 
     /** Replay a scripted trace through the real parser, for development without hardware. */
+    /**
+     * Arm a demo replay behind the same START gate the real board sits behind.
+     *
+     * Change 16.1: demo mode goes through the gate rather than around it, so the opening beat can
+     * be rehearsed -- and the button tested -- with no hardware present. The trace is held until
+     * START releases it.
+     */
     fun startDemo(trace: List<TraceStep>, speed: Float = 1f) {
         stopDemo()
         resetVisualisation()
+        pendingDemo = trace to speed
+        armStart()
+    }
+
+    private fun releaseDemo(trace: List<TraceStep>, speed: Float) {
         _demoRunning.value = true
         demoJob = viewModelScope.launch {
             simulator.replay(trace, speed).collectLatest { ingest(it) }
@@ -260,6 +329,58 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
         demoJob?.cancel()
         demoJob = null
         _demoRunning.value = false
+        pendingDemo = null
+    }
+
+    // -- Start gate (change 16.1) --------------------------------------------------------------
+
+    /**
+     * Show the recipe, then offer START.
+     *
+     * The intro plays over a board that is doing nothing at all, which is the point: the operator
+     * reads the recipe, then decides when the rig lights up.
+     */
+    private fun armStart() {
+        if (_startGate.value == StartGate.RUNNING) return
+        armJob?.cancel()
+        _startGate.value = StartGate.ARMING
+        startSequenceIntro(ARMED_SEQUENCE)
+        armJob = viewModelScope.launch {
+            delay(SEQUENCE_INTRO_MS)
+            if (_startGate.value == StartGate.ARMING) _startGate.value = StartGate.READY
+        }
+    }
+
+    private fun disarmStart() {
+        armJob?.cancel()
+        armJob = null
+        pendingDemo = null
+        _startGate.value = StartGate.IDLE
+    }
+
+    /**
+     * The operator pressed START.
+     *
+     * For a real link this writes the one command the firmware listens for; for an armed demo it
+     * releases the replay. Either way the gate leaves READY at once, because a second START would
+     * restart the run from cycle 1.
+     */
+    fun requestStart() {
+        if (_startGate.value != StartGate.READY) return
+        _startGate.value = StartGate.STARTING
+
+        val demo = pendingDemo
+        if (demo != null) {
+            pendingDemo = null
+            releaseDemo(demo.first, demo.second)
+            return
+        }
+
+        if (!ble.write(START_COMMAND)) {
+            // Nothing was written, so nothing is coming back. Drop back to READY rather than
+            // stranding the operator on a button that will never resolve.
+            _startGate.value = StartGate.READY
+        }
     }
 
     private fun clearSequenceIntro() {
@@ -273,6 +394,7 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
         poser3d.reset()
         assembler.reset()
         clearSequenceIntro()
+        disarmStart()
         lotDoneAtMs = 0L
         _plant.value = PlantState()
         _log.value = emptyList()
@@ -312,6 +434,18 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val MAX_LOG_LINES = 300
+
+        /** The one command `App/ble.c` listens for. CRLF, as the firmware terminates its own. */
+        val START_COMMAND: ByteArray = "START\r\n".toByteArray()
+
+        /**
+         * Which recipe to show while arming.
+         *
+         * The board has not told us anything yet -- it is dark, waiting to be asked -- and there
+         * is only one sequence in the firmware. When a second arrives this becomes a selection
+         * rather than a constant.
+         */
+        const val ARMED_SEQUENCE = 1
 
         /**
          * Left-side fraction of the arena under the top-left task card's horizontal span
