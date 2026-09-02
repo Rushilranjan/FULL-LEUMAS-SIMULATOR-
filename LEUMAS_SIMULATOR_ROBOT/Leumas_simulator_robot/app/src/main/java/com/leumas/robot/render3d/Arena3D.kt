@@ -5,6 +5,7 @@ import com.leumas.robot.render.Vec2
 import com.leumas.robot.render.lerp
 import kotlin.math.atan2
 import kotlin.math.hypot
+import kotlin.math.sqrt
 import kotlin.math.tan
 
 /**
@@ -251,13 +252,54 @@ object Arena3D {
     fun reachTarget(point: EdgePoint): Vec2 {
         val target = worldTargetFor(point)
         val dx = target.x - carriageXFor(point)
-        return clampToReach(
-            Vec2(
-                x = hypot(dx, REACH_DEPTH),
-                y = SHOULDER_Y - target.y,
-            )
-        )
+        val x = hypot(dx, REACH_DEPTH)
+        val baseY = SHOULDER_Y - target.y
+        return clampToReach(Vec2(x, baseY - affordableLift(x, baseY)))
     }
+
+    /**
+     * How far to raise the wrist so the DISPENSER lands on the calibrated point (change 35).
+     *
+     * The calibrated point is where MATERIAL is supposed to go, but the arm was steering the WRIST
+     * there, and the whole tool -- neck, vessel, hopper, pump -- hangs [TOOL_LIFT] below the wrist.
+     * So every part of the dispenser sat below the module, and powder leaving it could only ever
+     * fall further below. There was no height at which it could land on the point. That is the
+     * "it throws below the coordinate" fault, and it is geometric: no amount of tuning the stream
+     * reaches a point that is above where the stream begins.
+     *
+     * Raising the wrist by the full tool length fixes it, but only where the arm can afford the
+     * reach -- the top edge is already past [MAX_WRIST] and lifting it further would just clamp
+     * harder and point the arm somewhere the operator did not calibrate. So the lift is whatever
+     * fits and no more:
+     *
+     *     macro / gravimetric  TOP     121% -> 121%   lift 0.000   nothing to spare, unchanged
+     *     blender 1  RIGHT 0.30         77% -> 100%   lift 0.307   as much as the envelope allows
+     *     blender 2  RIGHT 0.60         66% ->  71%   lift 0.440   full
+     *     vessels / bottom edge        117% ->  81%   lift 0.440   full
+     *
+     * The bottom edge gets the best of it twice over: the dispenser lands on the point AND the
+     * reach comes back inside the envelope, so the arm bends there instead of being pinned at full
+     * extension. That is the straight-spar pose from change 24, fixed as a side effect rather than
+     * by making the machine bigger.
+     */
+    private fun affordableLift(x: Float, baseY: Float): Float {
+        val w = x - FOREARM
+        val r2 = MAX_WRIST * MAX_WRIST - w * w
+        if (r2 <= 0f) return 0f
+        // Largest d with |baseY - d| <= r, capped at the tool length and never negative.
+        return (baseY + sqrt(r2)).coerceIn(0f, TOOL_LIFT)
+    }
+
+    /**
+     * Wrist to the point where material lands, in world units.
+     *
+     * **This must track the tool drawn in `SceneRenderer.drawVessel`.** It is the gripper-to-nozzle
+     * chain -- VESSEL_DROP + VESSEL_HEIGHT + HOPPER_HEIGHT plus the peristaltic head's own offsets,
+     * about 0.340 -- plus POWDER_DROP, the short fall from the nozzle, so the granules come to rest
+     * ON the calibrated point rather than at it. Retune the tool geometry there and this wants the
+     * same edit; nothing enforces it, because the renderer's constants are private to it.
+     */
+    const val TOOL_LIFT = 0.44f
 
     /**
      * The approach point for a reach target (change 15.2).

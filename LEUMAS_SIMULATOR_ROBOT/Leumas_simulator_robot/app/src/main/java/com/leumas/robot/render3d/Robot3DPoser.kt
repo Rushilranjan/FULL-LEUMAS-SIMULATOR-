@@ -45,23 +45,6 @@ data class Payload(
 }
 
 /**
- * The module the arm is currently working at (change 34).
- *
- * The renderer needs the CALIBRATED COORDINATE in world space, and it cannot get that from the
- * arm: the tool hangs a third of a metre below the wrist, so anything drawn from the tool is
- * already below the point the operator calibrated. That is the "it throws below the coordinate"
- * fault. These are the station's own carriage, facing and reach target -- the exact three numbers
- * the poser steers to -- so `worldOf` on them lands on the coordinate itself.
- *
- * Only set while material is actually moving; null otherwise.
- */
-data class Station3D(
-    val carriageX: Float,
-    val yaw: Float,
-    val reach: Vec2,
-)
-
-/**
  * A resolution-independent snapshot of the arm for the 3-D renderer.
  *
  * [arm] is solved in the reach plane (see [Arena3D]); the renderer lifts those planar joints into
@@ -77,7 +60,6 @@ data class Robot3DPose(
     val wristRoll: Float,
     val motion: Float,
     val payload: Payload = Payload.EMPTY,
-    val station: Station3D? = null,
 ) {
     companion object {
         /** Idle: parked at rail centre, facing the camera, arm stowed, gripper open. */
@@ -232,14 +214,6 @@ class Robot3DPoser {
         val srcApproach = Arena3D.approachPoint(srcReach)
         val dstApproach = Arena3D.approachPoint(dstReach)
 
-        // Change 34: the station the arm is working at, for anything the renderer has to draw
-        // ON the calibrated coordinate rather than on the tool. Only while material moves.
-        val station = when (phase) {
-            RobotPhase.PICKING -> Station3D(srcX, srcYaw, srcReach)
-            RobotPhase.PLACING -> Station3D(dstX, dstYaw, dstReach)
-            else -> null
-        }
-
         val rawTarget = when (phase) {
             RobotPhase.MOVING_TO_SOURCE -> Arena3D.STOW
             // Travel to the approach point during POSITIONING, so the arm is already standing off
@@ -284,7 +258,6 @@ class Robot3DPoser {
             wristRoll = wristRoll,
             carrying = state.carryingPayload,
             payload = payloadFor(phase, state.phaseProgress, transfer),
-            station = station,
             previousX = previousX,
         )
     }
@@ -386,7 +359,6 @@ class Robot3DPoser {
         carrying: Boolean,
         payload: Payload,
         previousX: Float,
-        station: Station3D? = null,
     ): Robot3DPose {
         lastCarriageX = carriageX
         val raw = (abs(carriageX - previousX) / 0.04f).coerceIn(0f, 1f)
@@ -406,7 +378,6 @@ class Robot3DPoser {
             wristRoll = wristRoll,
             motion = smoothedMotion,
             payload = payload,
-            station = station,
         )
     }
 

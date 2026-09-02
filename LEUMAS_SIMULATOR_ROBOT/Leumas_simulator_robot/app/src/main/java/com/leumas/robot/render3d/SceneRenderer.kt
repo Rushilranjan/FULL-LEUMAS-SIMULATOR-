@@ -546,22 +546,9 @@ class SceneRenderer(
 
         if (payload.stream > 0.01f) {
             if (solid) {
-                // Change 34: powder falls STRAIGHT DOWN onto a tray, rather than flying off on a
-                // slanted arc to nowhere. See [drawPowderFall] and [drawTray].
-                val catchY = nozzle[1] - POWDER_DROP
-                val station = pose.station
-                val landY = if (station != null) {
-                    drawTray(
-                        anchor = worldOf(station.reach.x, station.reach.y,
-                                         station.carriageX, station.yaw),
-                        catchY = catchY,
-                        extend = payload.stream,
-                        yaw = station.yaw,
-                    )
-                } else {
-                    catchY
-                }
-                drawPowderFall(nozzle, landY, payload, timeS)
+                // Powder falls STRAIGHT DOWN from the dispenser and stops there, rather than
+                // flying off on a slanted arc to nowhere. See [drawPowderFall].
+                drawPowderFall(nozzle, nozzle[1] - POWDER_DROP, payload, timeS)
             } else {
                 // **Both directions run through the nozzle**, because the head is a peristaltic
                 // pump and a peristaltic pump is reversible -- rollers squeezing the other way draw
@@ -900,59 +887,6 @@ class SceneRenderer(
     }
 
     /**
-     * The station's tray: out of the module, down to catch the powder, back in (change 34).
-     *
-     * Anchored on the CALIBRATED COORDINATE, not on the tool -- that is the whole point. It rides
-     * between the coordinate and a catch height just under the dispenser, and its travel is purely
-     * vertical: x and z are the coordinate's throughout, so it emerges from the module, drops, and
-     * returns to exactly the point it came from.
-     *
-     * The extension is driven straight off [Payload.stream], the flow envelope, which is already a
-     * smooth 0 -> 1 -> 0 bell over the dispense. That gives emerge, hold and retract from one
-     * number, perfectly in step with the material, with nothing to keep in sync by hand.
-     *
-     * Returns the tray's surface height so the powder lands ON it rather than through it.
-     */
-    private fun drawTray(
-        anchor: FloatArray,
-        catchY: Float,
-        extend: Float,
-        yaw: Float,
-    ): Float {
-        val t = smoothstep(extend.coerceIn(0f, 1f))
-        val y = anchor[1] + (catchY - anchor[1]) * t
-        // Below this it is still inside the module, so there is nothing to see.
-        if (t < 0.02f) return y
-
-        val centre = floatArrayOf(anchor[0], y, anchor[2])
-        val side = sideAxis(yaw)
-
-        // The pan. A frustum is a shallow bowl the right way up, so this is one draw rather than a
-        // base and four walls -- and a bowl reads as a tray from every angle the turret swings to.
-        frustumBetween(centre, add(centre, scale(UP, TRAY_HEIGHT)), radius = TRAY_RADIUS)
-        program.setModel(model, 0.58f, 0.61f, 0.66f, specular = 0.75f, shininess = 64f, rim = 0.7f)
-        hopper.draw(program)
-
-        // A thin plate under it, so the pan does not read as open-bottomed from below.
-        cylinderBetween3(
-            add(centre, scale(UP, -0.004f)), add(centre, scale(UP, 0.004f)),
-            radius = TRAY_RADIUS * 0.34f,
-        )
-        program.setModel(model, 0.44f, 0.47f, 0.52f, specular = 0.6f, shininess = 50f)
-        cyl.draw(program)
-
-        // The rail it slides on, from the module out to the pan. Without it the tray floats.
-        val root = floatArrayOf(anchor[0], anchor[1], anchor[2])
-        listOf(-1f, 1f).forEach { sgn ->
-            val off = scale(side, TRAY_RADIUS * 0.62f * sgn)
-            cylinderBetween3(add(root, off), add(centre, off), radius = 0.007f)
-            program.setModel(model, 0.34f, 0.36f, 0.40f, specular = 0.7f, shininess = 58f)
-            cyl.draw(program)
-        }
-        return y
-    }
-
-    /**
      * Draw translucent geometry.
      *
      * Depth writes are switched off so overlapping translucent parts of the same body do not punch
@@ -1222,9 +1156,6 @@ class SceneRenderer(
         /** Speed the powder leaves the dispenser at, relative to its landing speed. */
         const val POWDER_EXIT = 0.40f
 
-        // The station tray (change 34).
-        const val TRAY_RADIUS = 0.070f
-        const val TRAY_HEIGHT = 0.026f
 
         const val LIQUID_SEGMENTS = 14
         const val LIQUID_RADIUS = 0.026f
