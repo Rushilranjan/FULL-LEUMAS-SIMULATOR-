@@ -45,26 +45,6 @@ data class Payload(
 }
 
 /**
- * The station the arm is working at, or driving on to (change 25.3).
- *
- * The renderer needs a **fixed** anchor to hang the module's pipework off, and the live pose cannot
- * give it one -- the arm is moving. This carries the station's own carriage position, facing and
- * reach target, all of which hold still for as long as the arm is there, so a fixture drawn from
- * them stays put while the machine drives onto it.
- *
- * They are also the exact numbers the poser steers the arm toward, and that is what makes the tool
- * end up *in* the pipe rather than near it: dock and target are the same point by construction
- * rather than by tuning.
- */
-data class Dock3D(
-    val carriageX: Float,
-    val yaw: Float,
-    val reach: Vec2,
-    /** Faded 0..1, so the fixture never pops in or blinks out from under the tool. */
-    val presence: Float,
-)
-
-/**
  * A resolution-independent snapshot of the arm for the 3-D renderer.
  *
  * [arm] is solved in the reach plane (see [Arena3D]); the renderer lifts those planar joints into
@@ -80,7 +60,6 @@ data class Robot3DPose(
     val wristRoll: Float,
     val motion: Float,
     val payload: Payload = Payload.EMPTY,
-    val dock: Dock3D? = null,
 ) {
     companion object {
         /** Idle: parked at rail centre, facing the camera, arm stowed, gripper open. */
@@ -163,7 +142,11 @@ class Robot3DPoser {
         // The dispenser only turns while it is actually moving material, and it advances by real
         // elapsed time rather than by phase progress, so the rotor speed stays constant regardless
         // of how the choreography is retimed.
-        val flowing = if (phase == RobotPhase.PLACING) state.let { pouringStream(it) } else 0f
+        // Change 26: the rotor turns while COLLECTING as well, and the other way round. The head
+        // is a peristaltic pump and it is reversible -- the renderer now draws the intake through
+        // the same nozzle, so a rotor sitting still through a collection would be the one part of
+        // the machine visibly not doing the work.
+        val flowing = pumpFlow(state)
         pumpAngle = (pumpAngle + flowing * PUMP_DEG_PER_SEC * dtMs / 1000f) % 360f
 
         if (transfer == null || phase == null) {
@@ -231,20 +214,6 @@ class Robot3DPoser {
         val srcApproach = Arena3D.approachPoint(srcReach)
         val dstApproach = Arena3D.approachPoint(dstReach)
 
-        // Change 25.3: the module's pipework belongs to the STATION, not to the arm, so it is
-        // anchored to the station's own carriage, facing and target rather than to the live pose.
-        // Faded in across the positioning move and out across the retract, so the fitting is
-        // already standing there when the tool arrives.
-        val dock = when (phase) {
-            RobotPhase.POSITIONING_AT_SOURCE -> Dock3D(srcX, srcYaw, srcReach, motion)
-            RobotPhase.PICKING -> Dock3D(srcX, srcYaw, srcReach, 1f)
-            RobotPhase.LIFTING -> Dock3D(srcX, srcYaw, srcReach, 1f - motion)
-            RobotPhase.POSITIONING_AT_DESTINATION -> Dock3D(dstX, dstYaw, dstReach, motion)
-            RobotPhase.PLACING -> Dock3D(dstX, dstYaw, dstReach, 1f)
-            RobotPhase.RETRACTING -> Dock3D(dstX, dstYaw, dstReach, 1f - motion)
-            else -> null
-        }
-
         val rawTarget = when (phase) {
             RobotPhase.MOVING_TO_SOURCE -> Arena3D.STOW
             // Travel to the approach point during POSITIONING, so the arm is already standing off
@@ -289,7 +258,6 @@ class Robot3DPoser {
             wristRoll = wristRoll,
             carrying = state.carryingPayload,
             payload = payloadFor(phase, state.phaseProgress, transfer),
-            dock = dock,
             previousX = previousX,
         )
     }
@@ -316,6 +284,7 @@ class Robot3DPoser {
                 fill = smoothstep((progress - FLOW_START) / (FLOW_END - FLOW_START)),
                 stream = flowEnvelope(progress),
                 pouring = false,
+                pumpAngle = pumpAngle,
             )
             RobotPhase.LIFTING,
             RobotPhase.MOVING_TO_DESTINATION,
@@ -332,11 +301,16 @@ class Robot3DPoser {
     }
 
     /**
-     * Flow rate during a dispense, used to drive the rotor. Zero in every other phase, so the
-     * dispenser is stationary whenever it is not discharging.
+     * Signed flow rate through the dispenser, used to drive the rotor (change 26).
+     *
+     * Positive discharging, negative drawing in, zero everywhere else -- so the rotor is stationary
+     * whenever no material is moving, and visibly runs backwards while the vessel fills.
      */
-    private fun pouringStream(state: RobotAnimationState): Float =
-        if (state.phase == RobotPhase.PLACING) flowEnvelope(state.phaseProgress) else 0f
+    private fun pumpFlow(state: RobotAnimationState): Float = when (state.phase) {
+        RobotPhase.PLACING -> flowEnvelope(state.phaseProgress)
+        RobotPhase.PICKING -> -flowEnvelope(state.phaseProgress)
+        else -> 0f
+    }
 
     /** Bell over the flowing part of a collect/dispense phase, easing the stream on and off. */
     private fun flowEnvelope(progress: Float): Float {
@@ -385,7 +359,6 @@ class Robot3DPoser {
         carrying: Boolean,
         payload: Payload,
         previousX: Float,
-        dock: Dock3D? = null,
     ): Robot3DPose {
         lastCarriageX = carriageX
         val raw = (abs(carriageX - previousX) / 0.04f).coerceIn(0f, 1f)
@@ -405,7 +378,6 @@ class Robot3DPoser {
             wristRoll = wristRoll,
             motion = smoothedMotion,
             payload = payload,
-            dock = dock,
         )
     }
 

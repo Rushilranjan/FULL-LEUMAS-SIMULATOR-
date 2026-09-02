@@ -58,19 +58,55 @@ class DispenserTest {
     }
 
     /**
-     * The dispenser rotor must turn while discharging and be stationary otherwise — it is driven by
-     * elapsed time, not phase progress, so it reads as doing work.
+     * The dispenser rotor must turn whenever material is moving, be stationary otherwise, and run
+     * the **other way** while drawing in. It is driven by elapsed time rather than phase progress,
+     * so it reads as doing work regardless of how the choreography is retimed.
+     *
+     * **Change 26 made this bidirectional.** It used to assert the rotor turned *only* while
+     * discharging, which matched a renderer that poured collected material into the top of the
+     * vessel. The vessel has had no open top since change 16.6 closed the mount into one continuous
+     * body, so the intake now goes through the nozzle — the head is a peristaltic pump and a
+     * peristaltic pump is reversible. A rotor sitting still through a collection would be the one
+     * part of the machine visibly not doing the work.
+     *
+     * The idle assertion is on `stream == 0f` rather than the old `<= 0.01f`. The rotor is driven by
+     * the same flow envelope that sets `stream`, so across the handful of frames where the envelope
+     * is ramping but still under 0.01 the rotor has genuinely, correctly begun to creep. The old
+     * threshold only passed because PICKING used to publish a hardcoded zero angle, hiding it.
      */
     @Test
-    fun `the dispenser rotor turns only while discharging`() {
+    fun `the dispenser rotor turns whenever material moves, and reverses to draw in`() {
         val frames = runTransfer(1, 4)
         val dispensing = frames.filter { it.second.pouring && it.second.stream > 0.5f }
-        val angles = dispensing.map { it.second.pumpAngle }
-        assertTrue("rotor never turned", angles.distinct().size > 20)
+        val collecting = frames.filter { !it.second.pouring && it.second.stream > 0.5f }
 
-        // Before any material moves, the rotor has not been driven at all.
-        val beforeFlow = frames.takeWhile { it.second.stream <= 0.01f }
+        assertTrue("rotor never turned while dispensing",
+            dispensing.map { it.second.pumpAngle }.distinct().size > 20)
+        assertTrue("rotor never turned while collecting",
+            collecting.map { it.second.pumpAngle }.distinct().size > 20)
+
+        // Opposite senses: drawing in unwinds the rotor, discharging winds it on.
+        assertTrue("collecting should unwind the rotor, got ${netTurn(collecting)}",
+            netTurn(collecting) < -20f)
+        assertTrue("dispensing should wind the rotor on, got ${netTurn(dispensing)}",
+            netTurn(dispensing) > 20f)
+
+        // The rotor is never driven while nothing at all is moving.
+        val beforeFlow = frames.takeWhile { it.second.stream == 0f }
+        assertTrue("beforeFlow window is empty", beforeFlow.isNotEmpty())
         assertTrue("rotor turned before any flow", beforeFlow.all { it.second.pumpAngle == 0f })
+    }
+
+    /** Net rotation across a window, unwrapping the 0..360 fold so the sign survives. */
+    private fun netTurn(frames: List<Pair<Float, Payload>>): Float {
+        var total = 0f
+        for (i in 1 until frames.size) {
+            var d = frames[i].second.pumpAngle - frames[i - 1].second.pumpAngle
+            if (d > 180f) d -= 360f
+            if (d < -180f) d += 360f
+            total += d
+        }
+        return total
     }
 
     /** Material kind follows the source module's production line, which picks the mechanism. */
