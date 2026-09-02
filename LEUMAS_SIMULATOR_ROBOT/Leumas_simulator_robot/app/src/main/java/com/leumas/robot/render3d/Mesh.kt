@@ -202,6 +202,93 @@ class Mesh private constructor(private val vbo: Int, private val vertexCount: In
         }
 
         /**
+         * A chamfered tapered prism, FLAT-shaded (change 44).
+         *
+         * [sides] main flanks, with the corner between each adjacent pair cut back by [chamfer] of
+         * the edge length -- so a hexagon comes out as twelve faces: six wide flanks and six narrow
+         * corner chamfers. No casting of this kind is ever left with sharp arrises, and the
+         * chamfers are what stop a prism reading as a crude extrusion.
+         *
+         * Every face carries ONE normal, unlike [frustum], whose per-vertex radial normals smear
+         * the shading across each facet. That is correct for something meant to look round and
+         * exactly wrong here: a faceted body only reads as machined if the light STEPS at the
+         * edges, and with a low side count the smeared version just looks like a lumpy cylinder.
+         *
+         * Same convention as the other primitives: axis +Y, unit height, widest radius 0.5, so the
+         * existing model-matrix helpers place it -- including [modelBox], which is what gives it
+         * the yaw the frustum helpers cannot supply.
+         */
+        fun castPrism(
+            sides: Int = 6,
+            chamfer: Float = 0.16f,
+            topRadius: Float = 0.40f,
+            bottomRadius: Float = 0.50f,
+        ): Mesh {
+            val list = ArrayList<Float>(sides * 2 * 12 * STRIDE_FLOATS)
+            val top = 0.5f
+            val bot = -0.5f
+            val slope = bottomRadius - topRadius
+            val invLen = 1f / kotlin.math.sqrt(slope * slope + 1f)
+            val nY = slope * invLen
+
+            fun push(x: Float, y: Float, z: Float, nx: Float, ny: Float, nz: Float) {
+                list.add(x); list.add(y); list.add(z); list.add(nx); list.add(ny); list.add(nz)
+            }
+
+            // The chamfered cross-section at unit scale: two vertices per main edge, so the corner
+            // between consecutive edges becomes a face of its own.
+            val ring = ArrayList<FloatArray>(sides * 2)
+            for (k in 0 until sides) {
+                val a0 = (k.toFloat() / sides) * 2f * Math.PI.toFloat()
+                val a1 = ((k + 1).toFloat() / sides) * 2f * Math.PI.toFloat()
+                val x0 = cos(a0); val z0 = sin(a0)
+                val x1 = cos(a1); val z1 = sin(a1)
+                ring.add(floatArrayOf(x0 + (x1 - x0) * chamfer, z0 + (z1 - z0) * chamfer))
+                ring.add(
+                    floatArrayOf(x0 + (x1 - x0) * (1f - chamfer), z0 + (z1 - z0) * (1f - chamfer))
+                )
+            }
+
+            val count = ring.size
+            for (i in 0 until count) {
+                val a = ring[i]
+                val b = ring[(i + 1) % count]
+
+                // Flat face normal: perpendicular to the face in plan, turned outward, then tilted
+                // by the taper so the facet lights as the sloped surface it actually is.
+                var nx = b[1] - a[1]
+                var nz = -(b[0] - a[0])
+                val l = kotlin.math.sqrt(nx * nx + nz * nz)
+                if (l < 1e-6f) continue
+                nx /= l; nz /= l
+                if (nx * (a[0] + b[0]) + nz * (a[1] + b[1]) < 0f) { nx = -nx; nz = -nz }
+                val fx = nx * invLen
+                val fz = nz * invLen
+
+                val bx0 = a[0] * bottomRadius; val bz0 = a[1] * bottomRadius
+                val bx1 = b[0] * bottomRadius; val bz1 = b[1] * bottomRadius
+                val tx0 = a[0] * topRadius; val tz0 = a[1] * topRadius
+                val tx1 = b[0] * topRadius; val tz1 = b[1] * topRadius
+
+                push(bx0, bot, bz0, fx, nY, fz)
+                push(bx1, bot, bz1, fx, nY, fz)
+                push(tx1, top, tz1, fx, nY, fz)
+                push(bx0, bot, bz0, fx, nY, fz)
+                push(tx1, top, tz1, fx, nY, fz)
+                push(tx0, top, tz0, fx, nY, fz)
+
+                push(0f, top, 0f, 0f, 1f, 0f)
+                push(tx0, top, tz0, 0f, 1f, 0f)
+                push(tx1, top, tz1, 0f, 1f, 0f)
+
+                push(0f, bot, 0f, 0f, -1f, 0f)
+                push(bx1, bot, bz1, 0f, -1f, 0f)
+                push(bx0, bot, bz0, 0f, -1f, 0f)
+            }
+            return upload(list.toFloatArray())
+        }
+
+        /**
          * A helical thread ribbon for the lead screw (change 13.5).
          *
          * Same convention as [cylinder]: axis along +Y, unit height, outer radius 0.5, so it can be

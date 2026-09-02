@@ -38,6 +38,8 @@ class SceneRenderer(
     private lateinit var hopper: Mesh
     private lateinit var limb: Mesh
     private lateinit var column: Mesh
+    private lateinit var turretBody: Mesh
+    private lateinit var turretRing: Mesh
 
     private var aspect: Float = 1.7f
     private val startNanos = System.nanoTime()
@@ -79,6 +81,10 @@ class SceneRenderer(
         // A strong taper for the pedestal column (change 42). Used both ways up:
         // narrow-end-first for the column, wide-end-first for the flare under the bearing.
         column = Mesh.frustum(topRadius = 0.50f, bottomRadius = 0.64f, segments = 96)
+        // The turret casting (change 44): a hexagon with its corners chamfered off, tapered for
+        // the body and straight for the two machined collars.
+        turretBody = Mesh.castPrism(sides = 6, chamfer = 0.16f, topRadius = 0.36f, bottomRadius = 0.50f)
+        turretRing = Mesh.castPrism(sides = 6, chamfer = 0.16f, topRadius = 0.50f, bottomRadius = 0.50f)
         heap = Mesh.frustum(topRadius = 0.18f, bottomRadius = 0.50f, segments = 44)
         // Hopper cone: wide at the top, tapering to the dispenser inlet (change 15.1).
         hopper = Mesh.frustum(topRadius = 0.50f, bottomRadius = 0.15f, segments = 56)
@@ -392,14 +398,72 @@ class SceneRenderer(
             }
         }
 
-        // Everything above the ring yaws with A1.
-        // Turret casting (red).
-        // Change 38: white, like the rest of it. The red casting was the last thing on the
-        // machine fighting the shell for attention, and in the references this casting is the
-        // largest clean surface on the whole arm.
-        modelBox(cx, Arena3D.SHOULDER_Y - 0.06f, 0f, 0.24f, 0.22f, 0.22f, yawDeg = yawDeg)
-        program.setModel(model, SHELL[0], SHELL[1], SHELL[2], specular = 1f, shininess = 120f, rim = 0.45f)
-        box.draw(program)
+        // ---- THE TURRET (change 44) ----------------------------------------------------------
+        //
+        // It was a 0.24 x 0.22 BOX, and a box was wrong twice over.
+        //
+        // As a shape, a square slab is the one thing on the machine that is not a casting: six flat
+        // faces, four hard vertical arrises, no taper, and -- being square -- two of its faces
+        // always present dead flat to the camera with no gradient across them at all. Nothing else
+        // here is built that way.
+        //
+        // Worse, it BURIED THE SHOULDER. The shoulder pivot is at y=0.62 and spans +/-0.106 across
+        // its axis, while the box ran 0.45..0.67 at +/-0.11-0.12 half-width -- so the entire A2
+        // joint, boss, pin, housings, neon and caps, sat INSIDE the casting and was never once
+        // visible. The arm appeared to grow out of a solid block. The elbow and wrist both read as
+        // real pivots and the shoulder read as nothing.
+        //
+        // It is now a hexagonal casting with its corners chamfered, tapering as it rises, and it
+        // stops BELOW the pivot -- 0.560 against a housing whose lowest point is 0.569. Two ears
+        // carry on up to the shoulder and straddle it, following the same clevis contract as every
+        // other axis (CLEVIS_IN..CLEVIS_OUT at LUG_R), so A2 now looks like A3 and A4 instead of
+        // being swallowed. Everything below yaws with A1.
+
+        // Machined base flange, bolted down to the bearing's inner race.
+        modelBox(cx, 0.462f, 0f, 0.288f, 0.034f, 0.288f, yawDeg = yawDeg)
+        program.setModel(model, 0.30f, 0.32f, 0.35f, specular = 1f, shininess = 116f, rim = 0.45f)
+        turretRing.draw(program)
+
+        // The casting. Wide at the flange, tapering as it rises, in the shell red.
+        modelBox(cx, 0.516f, 0f, 0.280f, 0.090f, 0.280f, yawDeg = yawDeg)
+        program.setModel(model, SHELL[0], SHELL[1], SHELL[2], specular = 1f, shininess = 124f, rim = 0.5f)
+        turretBody.draw(program)
+
+        // Dark relief where the casting meets its flange, so the two read as separate parts.
+        modelBox(cx, 0.474f, 0f, 0.286f, 0.010f, 0.286f, yawDeg = yawDeg)
+        program.setModel(model, 0.15f, 0.16f, 0.18f, specular = 0.6f, shininess = 52f)
+        turretRing.draw(program)
+
+        // Machined collar capping the casting, where the yoke grows out of it.
+        modelBox(cx, 0.558f, 0f, 0.208f, 0.016f, 0.208f, yawDeg = yawDeg)
+        program.setModel(model, 0.28f, 0.30f, 0.33f, specular = 1f, shininess = 112f, rim = 0.45f)
+        turretRing.draw(program)
+
+        // THE YOKE. The same two lugs every other pivot on this machine gets, at the same offsets
+        // in joint radii, so the shoulder is built to the identical contract.
+        run {
+            val pivot = floatArrayOf(cx, Arena3D.SHOULDER_Y, 0f)
+            val ear = sideAxis(pose.baseYaw)
+            listOf(-1f, 1f).forEach { sgn ->
+                cylinderBetween3(
+                    add(pivot, scale(ear, J_SHOULDER * CLEVIS_IN * sgn)),
+                    add(pivot, scale(ear, J_SHOULDER * CLEVIS_OUT * sgn)),
+                    radius = J_SHOULDER * LUG_R,
+                )
+                program.setModel(model, SHELL[0], SHELL[1], SHELL[2],
+                                 specular = 1f, shininess = 128f, rim = 0.5f)
+                cyl.draw(program)
+
+                val face = add(pivot, scale(ear, J_SHOULDER * CLEVIS_OUT * sgn))
+                cylinderBetween3(
+                    face, add(face, scale(ear, -J_SHOULDER * 0.05f * sgn)),
+                    radius = J_SHOULDER * (LUG_R - 0.10f),
+                )
+                program.setModel(model, 0.26f, 0.27f, 0.30f,
+                                 specular = 0.85f, shininess = 86f, rim = 0.45f)
+                cyl.draw(program)
+            }
+        }
 
         // The neon band that used to ring the turret's base is gone (change 42). At radius 0.135
         // inside a casting whose half-extents are 0.120 x 0.110, and at y 0.455-0.470 inside a box
@@ -418,23 +482,51 @@ class SceneRenderer(
         val drumCentre = DRUM_OFFSET
         val drumX = cx - fwd[0] * drumCentre
         val drumZ = -fwd[2] * drumCentre
-        val drumY = Arena3D.SHOULDER_Y - 0.02f
+        // Change 44: dropped from -0.02. The casting now tops out at 0.560, so at 0.600 the
+        // drum and its boss hung off the empty air above it.
+        val drumY = Arena3D.SHOULDER_Y - 0.10f
 
-        // Boss joining the turret casting to the drum.
-        cylinderBetween(
-            cx - fwd[0] * 0.05f, drumY, -fwd[2] * 0.05f,
-            drumX, drumY, drumZ,
-            radius = 0.055f,
-        )
-        program.setModel(model, 0.14f, 0.14f, 0.15f, specular = 0.3f, shininess = 26f)
+        // Change 44 rebuilt this as the A2 DRIVE MOTOR rather than a plain drum.
+        //
+        // The old box hid most of it. With the casting cut back to expose the shoulder there is
+        // nothing in front of it any more, and what was left was a radius-0.11 cylinder in near
+        // black at specular 0.3 -- against a machine finished at 1.0/128 it caught no highlight at
+        // all, so it read as a flat black hole cut in the backdrop rather than as a part. It is
+        // also what a real arm actually carries there: the A2 servo and its gearbox, which is
+        // worth building as such.
+        val motorFront = floatArrayOf(cx - fwd[0] * 0.055f, drumY, -fwd[2] * 0.055f)
+        val motorBack = floatArrayOf(drumX - fwd[0] * 0.048f, drumY, drumZ - fwd[2] * 0.048f)
+        val motorEnd = floatArrayOf(drumX + fwd[0] * 0.052f, drumY, drumZ + fwd[2] * 0.052f)
+
+        // Gearbox snout, from the casting out to the motor.
+        cylinderBetween3(motorFront, motorBack, radius = 0.052f)
+        program.setModel(model, 0.24f, 0.26f, 0.29f, specular = 1f, shininess = 112f, rim = 0.45f)
         cyl.draw(program)
 
-        cylinderBetween(
-            drumX - fwd[0] * 0.06f, drumY, drumZ - fwd[2] * 0.06f,
-            drumX + fwd[0] * 0.06f, drumY, drumZ + fwd[2] * 0.06f,
-            radius = 0.11f,
-        )
-        program.setModel(model, 0.08f, 0.08f, 0.08f, specular = 0.3f, shininess = 30f)
+        // Motor body.
+        cylinderBetween3(motorBack, motorEnd, radius = 0.076f)
+        program.setModel(model, 0.19f, 0.20f, 0.23f, specular = 1f, shininess = 116f, rim = 0.45f)
+        cyl.draw(program)
+
+        // Cooling ribs along it, which is most of what makes a motor read as a motor.
+        for (i in 0 until MOTOR_RIBS) {
+            val t = (i + 0.5f) / MOTOR_RIBS
+            val c = add(motorBack, scale(sub(motorEnd, motorBack), t))
+            cylinderBetween3(
+                sub(c, scale(fwd, 0.005f)), add(c, scale(fwd, 0.005f)), radius = 0.082f,
+            )
+            program.setModel(model, 0.30f, 0.32f, 0.36f, specular = 0.9f, shininess = 92f, rim = 0.4f)
+            cyl.draw(program)
+        }
+
+        // Machined end cap, with a lit ring round it.
+        val capFace = add(motorEnd, scale(fwd, 0.004f))
+        cylinderBetween3(motorEnd, capFace, radius = 0.078f)
+        program.setModel(model, NEON[0], NEON[1], NEON[2],
+                         specular = 1f, shininess = 128f, rim = NEON_RIM)
+        cyl.draw(program)
+        cylinderBetween3(capFace, add(capFace, scale(fwd, 0.014f)), radius = 0.050f)
+        program.setModel(model, 0.34f, 0.36f, 0.40f, specular = 1f, shininess = 110f, rim = 0.45f)
         cyl.draw(program)
 
         // Arm joints in world space, from the planar IK solution.
@@ -1699,8 +1791,11 @@ class SceneRenderer(
         const val SHADOW_SQUASH = 0.26f
         const val SHADOW_ALPHA = 0.055f
 
-        /** How far behind the turret centre the counterweight drum sits (change 14.7). */
+        /** How far behind the turret centre the A2 drive motor sits (change 14.7). */
         const val DRUM_OFFSET = 0.17f
+
+        /** Cooling ribs along the A2 motor body (change 44). */
+        const val MOTOR_RIBS = 4
 
         /** Brushed steel for the pail (change 14.4). */
         val STEEL = floatArrayOf(0.62f, 0.65f, 0.70f)
