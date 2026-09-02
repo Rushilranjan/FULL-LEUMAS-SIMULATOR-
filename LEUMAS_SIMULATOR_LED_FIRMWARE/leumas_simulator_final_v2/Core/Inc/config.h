@@ -353,6 +353,26 @@ extern const SlotLeds SLOT_LEDS[MODULE_COUNT];
 /* ======================================================================
  * 3. Misc.
  * ==================================================================== */
-#define BUTTON_DEBOUNCE_MS     25u
+/* How long the button line must be QUIET before an edge counts as a press.
+ * Change 29 raised this from 25 ms and changed what it measures: the window now
+ * restarts on every edge rather than running from the first accepted one, so it
+ * is the settling time of the contact rather than a fixed lockout.
+ *
+ * It is also a FLOOR ON HOW BRIEF A TAP CAN BE, because a press is confirmed by
+ * reading the pin once the line goes quiet (see button.c). 35 ms sits well under
+ * a deliberate press, 50-150 ms, and well over contact bounce. */
+#define BUTTON_DEBOUNCE_MS     35u
+
+/* Ignore further presses for this long after one is accepted. Belt to the
+ * settle window's braces: it swallows a second bounce burst from a marginal
+ * contact, and it is far below the rate anyone selects sequences by hand. */
+#define BUTTON_LOCKOUT_MS     300u
+
+/* 1 = the button pulls the pin UP to 3V3 when pressed (how the NUCLEO-144 blue
+ * button and most add-on buttons are wired, and what the rising-edge EXTI in
+ * main.c expects). Set to 0 if yours pulls the pin DOWN to GND instead --
+ * button.c then flips both the interrupt edge and the internal pull to match,
+ * with no change needed in the CubeMX-generated code. */
+#define BUTTON_ACTIVE_HIGH        1
 
 #endif /* APP_CONFIG_H */
