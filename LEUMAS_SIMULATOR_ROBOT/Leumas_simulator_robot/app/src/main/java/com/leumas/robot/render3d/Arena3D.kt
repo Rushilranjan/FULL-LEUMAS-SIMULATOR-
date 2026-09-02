@@ -295,11 +295,16 @@ object Arena3D {
      *
      * **This must track the tool drawn in `SceneRenderer.drawVessel`.** It is the gripper-to-nozzle
      * chain -- VESSEL_DROP + VESSEL_HEIGHT + HOPPER_HEIGHT plus the peristaltic head's own offsets,
-     * about 0.340 -- plus POWDER_DROP, the short fall from the nozzle, so the granules come to rest
-     * ON the calibrated point rather than at it. Retune the tool geometry there and this wants the
-     * same edit; nothing enforces it, because the renderer's constants are private to it.
+     * VESSEL_DROP + VESSEL_HEIGHT + HOPPER_HEIGHT plus the pump's own offset, about 0.265.
+     *
+     * Change 37 cut it from 0.44. The valve points SIDEWAYS now and material is pumped horizontally
+     * into the module's wall, so there is no longer a fall to allow for underneath -- the nozzle
+     * itself wants to be level with the calibrated point, not a drop above it.
+     *
+     * Retune the tool geometry in the renderer and this wants the same edit; nothing enforces it,
+     * because those constants are private to it.
      */
-    const val TOOL_LIFT = 0.44f
+    const val TOOL_LIFT = 0.27f
 
     /**
      * The approach point for a reach target (change 15.2).

@@ -292,27 +292,38 @@ class SceneRenderer(
         val wrist = worldOf(arm.wrist.x, arm.wrist.y, cx, pose.baseYaw)
         val gripper = worldOf(arm.gripper.x, arm.gripper.y, cx, pose.baseYaw)
 
-        // Lower arm (shoulder -> elbow), painted red, thick.
-        cylinderBetween3(shoulder, elbow, radius = 0.075f)
-        program.setModel(model, 0.80f, 0.14f, 0.16f, specular = 0.3f, shininess = 26f)
-        cyl.draw(program)
-        // Upper arm (elbow -> wrist).
-        cylinderBetween3(elbow, wrist, radius = 0.060f)
-        program.setModel(model, 0.80f, 0.14f, 0.16f, specular = 0.3f, shininess = 26f)
-        cyl.draw(program)
-        // Forearm (wrist -> gripper), held horizontal by the parallelogram.
-        cylinderBetween3(wrist, gripper, radius = 0.048f)
-        program.setModel(model, 0.82f, 0.16f, 0.18f, specular = 0.3f, shininess = 26f)
-        cyl.draw(program)
+        // -- the arm ---------------------------------------------------------------------------
+        //
+        // Change 37: each member was ONE bare cylinder. The geometry is unchanged -- same joints,
+        // same lengths, same radii, so the reach and every calibrated point are exactly as they
+        // were -- but each is now built up the way a real machine is: a dark structural core with
+        // a lighter shell clamped over its middle, seams where the panels meet, a lit ring at each
+        // end and a painted band. What sells a machine at this distance is not resolution, it is
+        // the number of distinct EDGES the eye can find along a surface, and a single smooth tube
+        // offers exactly two.
+        drawLimb(shoulder, elbow, 0.075f, side = sideAxis(pose.baseYaw))
+        drawLimb(elbow, wrist, 0.060f, side = sideAxis(pose.baseYaw))
+        drawLimb(wrist, gripper, 0.048f, side = sideAxis(pose.baseYaw))
 
-        // Chrome parallelogram tie-rod, running above the lower arm.
+        // Chrome parallelogram tie-rod, running above the lower arm, with its rod-end bosses.
         val rodA = floatArrayOf(shoulder[0], shoulder[1] + 0.10f, shoulder[2])
         val rodB = floatArrayOf(elbow[0], elbow[1] + 0.08f, elbow[2])
         cylinderBetween3(rodA, rodB, radius = 0.018f)
-        program.setModel(model, 0.78f, 0.80f, 0.83f, specular = 0.7f, shininess = 56f)
+        program.setModel(model, 0.80f, 0.82f, 0.86f, specular = 0.95f, shininess = 96f, rim = 0.6f)
         cyl.draw(program)
+        listOf(rodA, rodB).forEach { end ->
+            val n = normalize(sub(rodB, rodA))
+            cylinderBetween3(sub(end, scale(n, 0.012f)), add(end, scale(n, 0.012f)), radius = 0.028f)
+            program.setModel(model, 0.20f, 0.21f, 0.24f, specular = 0.6f, shininess = 48f)
+            cyl.draw(program)
+        }
 
-        // Joint housings (dark stubby cylinders across each pivot).
+        // The dress cable. Every arm in the reference photographs has one and it is most of what
+        // reads as "machine" rather than "shape": a loom slung from the shoulder, sagging past the
+        // elbow, clipped to the wrist. Drawn as a quadratic so it bows the way a cable hangs.
+        drawCableRun(rodA, elbow, wrist)
+
+        // Joint housings, each a lit bearing rather than a dark stub.
         drawJoint(shoulder, pose.baseYaw, 0.085f)
         drawJoint(elbow, pose.baseYaw, 0.070f)
         drawJoint(wrist, pose.baseYaw, 0.055f)
@@ -320,17 +331,159 @@ class SceneRenderer(
         drawEndEffector(pose, wrist, gripper, timeS)
     }
 
+    /**
+     * One arm member, dressed (change 37).
+     *
+     * Geometry is untouched: [a] to [b] at [radius], exactly the tube it replaces. Everything here
+     * is skin. The build order matters and is the same one a real arm has --
+     *
+     *   1. a dark structural core, run the full length and left showing at both ends, so each
+     *      member visibly plugs INTO its joints instead of butting against them;
+     *   2. a pale shell clamped over the middle, glossy, which is the surface the light works on;
+     *   3. seams where the shell's panels meet -- three thin rings, slightly proud, and the single
+     *      cheapest thing on this list. Edges are what the eye counts;
+     *   4. a lit ring at each end, which is what makes it read as powered rather than painted;
+     *   5. a painted identity band.
+     *
+     * There is no emissive channel in the shader, so the lit rings are a bright colour at maximum
+     * [rim] -- the fresnel term lifts the silhouette and that is what a glowing edge looks like.
+     */
+    private fun drawLimb(a: FloatArray, b: FloatArray, radius: Float, side: FloatArray) {
+        val span = sub(b, a)
+        val length = len(span)
+        if (length < 1e-4f) return
+        val dir = scale(span, 1f / length)
+
+        // 1. structural core
+        cylinderBetween3(a, b, radius = radius * 0.84f)
+        program.setModel(model, 0.12f, 0.13f, 0.15f, specular = 0.55f, shininess = 46f)
+        cyl.draw(program)
+
+        // 2. shell
+        val s0 = add(a, scale(dir, length * LIMB_SHELL_INSET))
+        val s1 = add(a, scale(dir, length * (1f - LIMB_SHELL_INSET)))
+        cylinderBetween3(s0, s1, radius = radius)
+        program.setModel(model, 0.90f, 0.91f, 0.94f, specular = 0.92f, shininess = 88f, rim = 0.5f)
+        cyl.draw(program)
+
+        // 3. panel seams
+        listOf(0.30f, 0.50f, 0.70f).forEach { t ->
+            val c = add(a, scale(dir, length * t))
+            cylinderBetween3(
+                sub(c, scale(dir, 0.005f)), add(c, scale(dir, 0.005f)),
+                radius = radius * 1.03f,
+            )
+            program.setModel(model, 0.17f, 0.18f, 0.21f, specular = 0.45f, shininess = 34f)
+            cyl.draw(program)
+        }
+
+        // 4. lit rings, just inboard of each shell end
+        listOf(LIMB_SHELL_INSET + 0.035f, 1f - LIMB_SHELL_INSET - 0.035f).forEach { t ->
+            val c = add(a, scale(dir, length * t))
+            cylinderBetween3(
+                sub(c, scale(dir, 0.008f)), add(c, scale(dir, 0.008f)),
+                radius = radius * 1.05f,
+            )
+            program.setModel(
+                model, ACCENT[0], ACCENT[1], ACCENT[2],
+                specular = 1f, shininess = 110f, rim = 1f,
+            )
+            cyl.draw(program)
+        }
+
+        // 5. identity band
+        val c = add(a, scale(dir, length * 0.50f))
+        cylinderBetween3(
+            sub(c, scale(dir, 0.022f)), add(c, scale(dir, 0.022f)),
+            radius = radius * 1.04f,
+        )
+        program.setModel(model, 0.78f, 0.13f, 0.15f, specular = 0.6f, shininess = 52f, rim = 0.3f)
+        cyl.draw(program)
+
+        // A raised rib down one flank, so the member is not a surface of revolution from every
+        // angle. Cheap, and it is what stops a cylinder reading as a cylinder.
+        val ribA = add(add(s0, scale(side, radius * 0.86f)), scale(dir, length * 0.04f))
+        val ribB = add(add(s1, scale(side, radius * 0.86f)), scale(dir, -length * 0.04f))
+        cylinderBetween3(ribA, ribB, radius = radius * 0.17f)
+        program.setModel(model, 0.62f, 0.64f, 0.68f, specular = 0.8f, shininess = 70f, rim = 0.5f)
+        cyl.draw(program)
+    }
+
+    /**
+     * The dress cable, shoulder to wrist (change 37).
+     *
+     * A quadratic through a control point pushed below and behind the elbow, so it hangs and then
+     * is drawn back in, which is how a loom behaves when the arm folds. Segmented, with a clip
+     * partway along; the clip is what tells you it is attached rather than floating.
+     */
+    private fun drawCableRun(from: FloatArray, via: FloatArray, to: FloatArray) {
+        val control = add(via, floatArrayOf(0f, -CABLE_SAG, 0f))
+        var previous = from
+        for (i in 1..CABLE_SEGMENTS) {
+            val t = i.toFloat() / CABLE_SEGMENTS
+            val inv = 1f - t
+            val p = floatArrayOf(
+                inv * inv * from[0] + 2f * inv * t * control[0] + t * t * to[0],
+                inv * inv * from[1] + 2f * inv * t * control[1] + t * t * to[1],
+                inv * inv * from[2] + 2f * inv * t * control[2] + t * t * to[2],
+            )
+            cylinderBetween3(previous, p, radius = CABLE_RADIUS)
+            program.setModel(model, 0.09f, 0.09f, 0.10f, specular = 0.35f, shininess = 28f, rim = 0.35f)
+            cyl.draw(program)
+            if (i == CABLE_SEGMENTS / 2) {
+                cylinderBetween3(previous, p, radius = CABLE_RADIUS * 1.9f)
+                program.setModel(model, 0.30f, 0.32f, 0.36f, specular = 0.6f, shininess = 44f)
+                cyl.draw(program)
+            }
+            previous = p
+        }
+    }
+
     private fun drawJoint(p: FloatArray, yaw: Float, radius: Float) {
         // A short cylinder whose axis is the pivot line: perpendicular to the reach plane, i.e. the
-        // world "side" direction for this yaw.
+        // world "side" direction for this yaw. Change 37 layered it: housing, a proud bearing race,
+        // a lit ring in the gap, and a bolt circle. A pivot is the most looked-at part of an arm.
         val side = sideAxis(yaw)
-        cylinderBetween(
-            p[0] - side[0] * radius, p[1], p[2] - side[2] * radius,
-            p[0] + side[0] * radius, p[1], p[2] + side[2] * radius,
-            radius = radius,
-        )
-        program.setModel(model, 0.13f, 0.13f, 0.14f, specular = 0.4f, shininess = 34f)
+        val h = scale(side, radius)
+
+        cylinderBetween3(sub(p, h), add(p, h), radius = radius)
+        program.setModel(model, 0.13f, 0.13f, 0.15f, specular = 0.45f, shininess = 36f)
         cyl.draw(program)
+
+        // Bearing race, proud of the housing on both faces.
+        listOf(-1f, 1f).forEach { sgn ->
+            val face = add(p, scale(side, radius * sgn))
+            cylinderBetween3(
+                face, add(face, scale(side, radius * 0.16f * sgn)),
+                radius = radius * 0.74f,
+            )
+            program.setModel(model, 0.74f, 0.76f, 0.80f, specular = 0.9f, shininess = 86f, rim = 0.6f)
+            cyl.draw(program)
+
+            // Lit ring recessed behind the race.
+            cylinderBetween3(
+                add(face, scale(side, -radius * 0.05f * sgn)),
+                add(face, scale(side, radius * 0.03f * sgn)),
+                radius = radius * 0.90f,
+            )
+            program.setModel(
+                model, ACCENT[0], ACCENT[1], ACCENT[2],
+                specular = 1f, shininess = 110f, rim = 1f,
+            )
+            cyl.draw(program)
+
+            // Bolt circle.
+            val u = normalize(cross(side, UP))
+            val v = normalize(cross(side, u))
+            for (i in 0 until JOINT_BOLTS) {
+                val a = i * (2f * Math.PI.toFloat() / JOINT_BOLTS)
+                val o = add(scale(u, cos(a) * radius * 0.52f), scale(v, sin(a) * radius * 0.52f))
+                val c = add(face, o)
+                cylinderBetween3(c, add(c, scale(side, radius * 0.10f * sgn)), radius = radius * 0.09f)
+                program.setModel(model, 0.44f, 0.46f, 0.50f, specular = 0.8f, shininess = 72f)
+                cyl.draw(program)
+            }
+        }
     }
 
     private fun drawEndEffector(pose: Robot3DPose, wrist: FloatArray, gripper: FloatArray, timeS: Float) {
@@ -503,6 +656,33 @@ class SceneRenderer(
             cyl.draw(program)
         }
 
+        // A lit band at the vessel's shoulder, and bolts round the top flange (change 37). The
+        // vessel is the part of the tool the eye rests on longest, and it was two hoops on glass.
+        run {
+            val shoulderY = add(bottom, scale(axis, VESSEL_HEIGHT * 0.92f))
+            cylinderBetween3(
+                add(shoulderY, scale(axis, -0.005f)), add(shoulderY, scale(axis, 0.005f)),
+                radius = VESSEL_RADIUS * 1.09f,
+            )
+            program.setModel(
+                model, ACCENT[0], ACCENT[1], ACCENT[2],
+                specular = 1f, shininess = 110f, rim = 1f,
+            )
+            cyl.draw(program)
+
+            for (i in 0 until FLANGE_BOLTS) {
+                val a = i * (2f * Math.PI.toFloat() / FLANGE_BOLTS)
+                val o = add(scale(side, cos(a) * VESSEL_RADIUS * 0.98f),
+                            scale(out, sin(a) * VESSEL_RADIUS * 0.98f))
+                val c = add(top, o)
+                cylinderBetween3(
+                    add(c, scale(axis, -0.004f)), add(c, scale(axis, 0.010f)), radius = 0.006f,
+                )
+                program.setModel(model, 0.52f, 0.54f, 0.58f, specular = 0.85f, shininess = 78f)
+                cyl.draw(program)
+            }
+        }
+
         // Steel hoops banding the glass, which is what stops a clear tube reading as a plain
         // cylinder and gives the vessel its scale.
         listOf(0.30f, 0.70f).forEach { f ->
@@ -540,7 +720,8 @@ class SceneRenderer(
         //
         // The MATERIAL still differs: powder draws as a granule cone, liquid as a
         // falling stream. That is what is being moved, not what moves it.
-        val nozzle = drawPeristalticHead(hopperTip, out, side, axis, payload)
+        val nozzle =
+            drawPeristalticHead(hopperTip, out, side, axis, forward(pose.baseYaw), payload)
 
         // -- material transfer -----------------------------------------------------------------------
 
@@ -762,6 +943,7 @@ class SceneRenderer(
         out: FloatArray,
         side: FloatArray,
         axis: FloatArray,
+        dispense: FloatArray,
         payload: Payload,
     ): FloatArray {
         // The head sits just below the hopper outlet, its rotor face turned toward the camera.
@@ -774,6 +956,31 @@ class SceneRenderer(
         )
         program.setModel(model, 0.30f, 0.33f, 0.38f, specular = 0.65f, shininess = 54f, rim = 0.5f)
         cyl.draw(program)
+
+        // Lit rim around the race, so the head reads as powered and its rotation is legible even
+        // when the rollers themselves are edge-on to the camera (change 37).
+        listOf(-1f, 1f).forEach { sgn ->
+            val face = add(hub, scale(side, PUMP_WIDTH * 0.5f * sgn))
+            cylinderBetween3(
+                face, add(face, scale(side, 0.004f * sgn)), radius = PUMP_RADIUS * 0.96f,
+            )
+            program.setModel(
+                model, ACCENT[0], ACCENT[1], ACCENT[2],
+                specular = 1f, shininess = 110f, rim = 1f,
+            )
+            cyl.draw(program)
+
+            // Bolt ring on the cover plate.
+            for (i in 0 until PUMP_BOLTS) {
+                val a = i * (2f * Math.PI.toFloat() / PUMP_BOLTS)
+                val o = add(scale(out, cos(a) * PUMP_RADIUS * 0.74f),
+                            scale(axis, sin(a) * PUMP_RADIUS * 0.74f))
+                val c = add(face, o)
+                cylinderBetween3(c, add(c, scale(side, 0.010f * sgn)), radius = 0.006f)
+                program.setModel(model, 0.50f, 0.52f, 0.56f, specular = 0.85f, shininess = 78f)
+                cyl.draw(program)
+            }
+        }
 
         // Rotor hub.
         cylinderBetween3(
@@ -819,11 +1026,32 @@ class SceneRenderer(
             previous = point
         }
 
-        // Nozzle at the tube exit.
-        val nozzleTip = add(previous, scale(axis, -PUMP_NOZZLE))
-        cylinderBetween3(previous, nozzleTip, radius = PUMP_TUBE_R * 1.35f)
-        program.setModel(model, 0.34f, 0.37f, 0.41f, specular = 0.7f, shininess = 58f, rim = 0.5f)
+        // THE VALVE, POINTING SIDEWAYS (change 37) -- along the dispense axis, because that is
+        // the way material leaves. Built as a real fitting rather than one stub: a flange where it
+        // meets the tube, a body, a lit collar, and a tapered tip.
+        val flange = add(previous, scale(dispense, 0.006f))
+        cylinderBetween3(previous, flange, radius = PUMP_TUBE_R * 2.1f)
+        program.setModel(model, 0.30f, 0.32f, 0.36f, specular = 0.7f, shininess = 58f, rim = 0.5f)
         cyl.draw(program)
+
+        val bodyEnd = add(flange, scale(dispense, PUMP_NOZZLE * 0.62f))
+        cylinderBetween3(flange, bodyEnd, radius = PUMP_TUBE_R * 1.7f)
+        program.setModel(model, 0.46f, 0.48f, 0.53f, specular = 0.88f, shininess = 84f, rim = 0.6f)
+        cyl.draw(program)
+
+        // Lit collar: the one part of the tool that says it is live.
+        val collar = add(bodyEnd, scale(dispense, 0.004f))
+        cylinderBetween3(bodyEnd, collar, radius = PUMP_TUBE_R * 1.85f)
+        program.setModel(
+            model, ACCENT[0], ACCENT[1], ACCENT[2],
+            specular = 1f, shininess = 110f, rim = 1f,
+        )
+        cyl.draw(program)
+
+        val nozzleTip = add(collar, scale(dispense, PUMP_NOZZLE * 0.38f))
+        frustumBetween(nozzleTip, collar, radius = PUMP_TUBE_R * 1.6f)
+        program.setModel(model, 0.24f, 0.26f, 0.30f, specular = 0.75f, shininess = 66f, rim = 0.5f)
+        hopper.draw(program)
         return nozzleTip
     }
 
@@ -1173,8 +1401,16 @@ class SceneRenderer(
          * hopper, round the front, to pointing down and outward.
          *
          */
+        /**
+         * The tube's sweep round the race, in half-turns of pi: from straight up out of the hopper
+         * round to the DISPENSE side (change 37), where the valve is.
+         *
+         * It used to carry on to 1.15 and point the outlet at the floor, which was right when
+         * material was dropped and wrong now that it is pumped horizontally into the module's wall.
+         * A valve aimed down while the stream leaves sideways is the machine contradicting itself.
+         */
         const val PUMP_TUBE_FROM = 0.50f
-        const val PUMP_TUBE_ARC = 1.15f
+        const val PUMP_TUBE_ARC = -0.50f
 
         const val POWDER_GRAINS = 40
         /**
@@ -1281,6 +1517,20 @@ class SceneRenderer(
         /** How far drops wander off the axis, through a disc rather than a plane (change 26). */
         const val DROP_SPREAD = 0.030f
 
+
+        // Arm dressing (change 37).
+        /** Accent light colour. No emissive channel exists, so these are drawn at full rim. */
+        val ACCENT = floatArrayOf(0.30f, 0.85f, 1.00f)
+
+        /** How far in from each end the shell stops, leaving the structural core showing. */
+        const val LIMB_SHELL_INSET = 0.10f
+
+        const val JOINT_BOLTS = 8
+        const val PUMP_BOLTS = 10
+        const val FLANGE_BOLTS = 8
+        const val CABLE_SEGMENTS = 10
+        const val CABLE_RADIUS = 0.014f
+        const val CABLE_SAG = 0.10f
 
         /** Band over which the hand's side axis blends to the turret fallback (change 13.3). */
         const val SIDE_BLEND_LO = 0.03f

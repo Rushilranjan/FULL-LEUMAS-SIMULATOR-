@@ -146,7 +146,7 @@ class Robot3DPoser {
         // is a peristaltic pump and it is reversible -- the renderer now draws the intake through
         // the same nozzle, so a rotor sitting still through a collection would be the one part of
         // the machine visibly not doing the work.
-        val flowing = pumpFlow(state)
+        val flowing = pumpFlow(state, materialOf(state.transfer))
         pumpAngle = (pumpAngle + flowing * PUMP_DEG_PER_SEC * dtMs / 1000f) % 360f
 
         if (transfer == null || phase == null) {
@@ -306,11 +306,30 @@ class Robot3DPoser {
      * Positive discharging, negative drawing in, zero everywhere else -- so the rotor is stationary
      * whenever no material is moving, and visibly runs backwards while the vessel fills.
      */
-    private fun pumpFlow(state: RobotAnimationState): Float = when (state.phase) {
-        RobotPhase.PLACING -> flowEnvelope(state.phaseProgress)
-        RobotPhase.PICKING -> -flowEnvelope(state.phaseProgress)
-        else -> 0f
-    }
+    private fun pumpFlow(state: RobotAnimationState, kind: MaterialKind): Float =
+        when (state.phase) {
+            RobotPhase.PLACING -> flowEnvelope(state.phaseProgress)
+
+            // Change 37: THE HEAD DOES NOT RUN WHILE COLLECTING POWDER. A macro or gravimetric
+            // discharges into the vessel under gravity and the vessel is only receiving -- nothing
+            // passes through the pump at all, so a rotor turning here is the machine lying about
+            // what it is doing. Liquid is the exception and genuinely is drawn in through the head,
+            // which is reversible, so it still runs, backwards.
+            RobotPhase.PICKING ->
+                if (kind == MaterialKind.LIQUID) -flowEnvelope(state.phaseProgress) else 0f
+
+            else -> 0f
+        }
+
+    /** Which material a transfer carries, from the source module's production line. */
+    private fun materialOf(transfer: ActiveTransfer?): MaterialKind =
+        if (transfer != null &&
+            SlotMap.specOrNull(transfer.from)?.line == ProductionLine.LIQUID
+        ) {
+            MaterialKind.LIQUID
+        } else {
+            MaterialKind.SOLID
+        }
 
     /** Bell over the flowing part of a collect/dispense phase, easing the stream on and off. */
     private fun flowEnvelope(progress: Float): Float {

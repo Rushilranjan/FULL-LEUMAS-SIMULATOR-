@@ -75,26 +75,48 @@ class DispenserTest {
      * threshold only passed because PICKING used to publish a hardcoded zero angle, hiding it.
      */
     @Test
-    fun `the dispenser rotor turns whenever material moves, and reverses to draw in`() {
-        val frames = runTransfer(1, 4)
+    fun `the rotor runs to discharge, and idles while powder is collected`() {
+        val frames = runTransfer(1, 4)          // solid: macro 1 -> blender 2
         val dispensing = frames.filter { it.second.pouring && it.second.stream > 0.5f }
         val collecting = frames.filter { !it.second.pouring && it.second.stream > 0.5f }
+        assertTrue("never dispensed", dispensing.isNotEmpty())
+        assertTrue("never collected", collecting.isNotEmpty())
 
         assertTrue("rotor never turned while dispensing",
             dispensing.map { it.second.pumpAngle }.distinct().size > 20)
-        assertTrue("rotor never turned while collecting",
-            collecting.map { it.second.pumpAngle }.distinct().size > 20)
-
-        // Opposite senses: drawing in unwinds the rotor, discharging winds it on.
-        assertTrue("collecting should unwind the rotor, got ${netTurn(collecting)}",
-            netTurn(collecting) < -20f)
         assertTrue("dispensing should wind the rotor on, got ${netTurn(dispensing)}",
             netTurn(dispensing) > 20f)
+
+        // **Change 37: the head does NOT run while POWDER is collected.** The macro discharges
+        // into the vessel under gravity and the vessel is only receiving -- nothing passes through
+        // the pump, so a turning rotor would be the machine lying about what it is doing.
+        assertEquals(
+            "rotor should be still while collecting powder",
+            0f, netTurn(collecting), 1e-3f,
+        )
 
         // The rotor is never driven while nothing at all is moving.
         val beforeFlow = frames.takeWhile { it.second.stream == 0f }
         assertTrue("beforeFlow window is empty", beforeFlow.isNotEmpty())
         assertTrue("rotor turned before any flow", beforeFlow.all { it.second.pumpAngle == 0f })
+    }
+
+    /**
+     * Liquid is the exception: the head genuinely draws it in, so it still runs -- backwards.
+     *
+     * This is what stops the change above being over-applied. A peristaltic head is reversible and
+     * the vessel has no open top (change 16.6), so a liquid intake really does pass through the
+     * pump; only powder, which falls in under gravity, does not.
+     */
+    @Test
+    fun `the rotor reverses to draw liquid in`() {
+        val frames = runTransfer(7, 9)          // liquid: macro -> vessel
+        val collecting = frames.filter { !it.second.pouring && it.second.stream > 0.5f }
+        assertTrue("never collected", collecting.isNotEmpty())
+        assertTrue("rotor never turned drawing liquid in",
+            collecting.map { it.second.pumpAngle }.distinct().size > 20)
+        assertTrue("drawing in should unwind the rotor, got ${netTurn(collecting)}",
+            netTurn(collecting) < -20f)
     }
 
     /** Net rotation across a window, unwrapping the 0..360 fold so the sign survives. */
