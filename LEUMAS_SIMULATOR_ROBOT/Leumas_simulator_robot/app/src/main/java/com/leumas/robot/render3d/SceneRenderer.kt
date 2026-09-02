@@ -788,16 +788,9 @@ class SceneRenderer(
             program.setModel(model, SHELL[0], SHELL[1], SHELL[2],
                              specular = 1f, shininess = 128f, rim = 0.5f)
             cyl.draw(program)
-            for (i in 0 until JOINT_BOLTS) {
-                val ang = i * (2f * Math.PI.toFloat() / JOINT_BOLTS)
-                val up = normalize(cross(side, dir))
-                val o = add(scale(side, cos(ang) * radius * 0.82f),
-                            scale(up, sin(ang) * radius * 0.82f))
-                val c = add(b, o)
-                cylinderBetween3(sub(c, scale(dir, 0.006f)), c, radius = radius * 0.10f)
-                program.setModel(model, 0.50f, 0.52f, 0.56f, specular = 0.85f, shininess = 78f)
-                cyl.draw(program)
-            }
+            // No bolt circle here (change 46). The A6 housing seats directly on this flange and
+            // covers it, so eight studs bought nothing but eight more rings in the one part of the
+            // machine that already had the most.
         }
     }
 
@@ -852,7 +845,7 @@ class SceneRenderer(
             sub(p, scale(side, radius * CLEVIS_OUT)), add(p, scale(side, radius * CLEVIS_OUT)),
             radius = radius * PIN_R,
         )
-        program.setModel(model, 0.66f, 0.69f, 0.74f, specular = 1f, shininess = 120f, rim = 0.7f)
+        program.setModel(model, 0.52f, 0.54f, 0.58f, specular = 1f, shininess = 140f, rim = 0.7f)
         cyl.draw(program)
 
         listOf(-1f, 1f).forEach { sgn ->
@@ -871,12 +864,13 @@ class SceneRenderer(
             // does not need fins; the bolt ring below already says it is a bolted-on housing, and
             // leaving them off is flatter, which is the direction this was going in anyway.
 
-            // Neon ring on the housing's outer face.
+            // Polished bezel on the housing's outer face. See [BEZEL]: this was the cyan ring
+            // that made every pivot read blue.
             cylinderBetween3(
                 end, add(p, scale(side, radius * NEON_OUT * sgn)), radius = radius * (HOUSING_R + 0.02f),
             )
-            program.setModel(model, NEON[0], NEON[1], NEON[2],
-                             specular = 1f, shininess = 128f, rim = NEON_RIM)
+            program.setModel(model, BEZEL[0], BEZEL[1], BEZEL[2],
+                             specular = 1f, shininess = 142f, rim = 0.75f)
             cyl.draw(program)
 
             // Black cap over the pin's end.
@@ -1015,25 +1009,17 @@ class SceneRenderer(
                          specular = 1f, shininess = 128f, rim = 0.5f)
         turretRing.draw(program)
 
-        // Gloss-black bearing stack, split by a lit line: the A6 rotary joint itself.
-        val bearTop = add(gripper, scale(down, 0.012f))
-        val bearSplit = add(gripper, scale(down, 0.020f))
-        cylinderBetween3(bearTop, bearSplit, radius = 0.046f)
+        // Gloss-black bearing collar, with the split line lit: the A6 rotary joint itself. One
+        // collar rather than the two it was, so the tool end carries one fewer ring.
+        val bearSplit = add(gripper, scale(down, 0.026f))
+        cylinderBetween3(add(gripper, scale(down, 0.012f)), bearSplit, radius = 0.046f)
         program.setModel(model, JOINT[0], JOINT[1], JOINT[2],
-                         specular = 1f, shininess = 138f, rim = 0.5f)
+                         specular = 1f, shininess = 140f, rim = 0.5f)
         cyl.draw(program)
 
         cylinderBetween3(bearSplit, add(bearSplit, scale(down, 0.005f)), radius = 0.0435f)
         program.setModel(model, NEON[0], NEON[1], NEON[2],
                          specular = 1f, shininess = 128f, rim = NEON_RIM)
-        cyl.draw(program)
-
-        cylinderBetween3(
-            add(bearSplit, scale(down, 0.005f)), add(gripper, scale(down, 0.032f)),
-            radius = 0.046f,
-        )
-        program.setModel(model, JOINT[0], JOINT[1], JOINT[2],
-                         specular = 1f, shininess = 138f, rim = 0.5f)
         cyl.draw(program)
 
         // Bearing race under the actuator -- the surface the head rotates on.
@@ -1122,8 +1108,15 @@ class SceneRenderer(
             cyl.draw(program)
         }
 
-        // A lit band at the vessel's shoulder, and bolts round the top flange (change 37). The
-        // vessel is the part of the tool the eye rests on longest, and it was two hoops on glass.
+        // A lit band at the vessel's shoulder.
+        //
+        // Change 46 stripped the ring of flange bolts that used to sit beside it, and took the
+        // glass from two hoops to one. Counted up, the span between the forearm and the vessel had
+        // become sixteen separate concentric rings inside about a tenth of the arm's length -- the
+        // pivot's lug, relief, housing, bezel and cap, the hex housing, three in the bearing stack,
+        // the race, eight flange studs, two hoops and the shoulder band -- and at that density
+        // none of them reads as anything. What is left is the band, one hoop, and the bearing
+        // split, so each of the three now means something.
         run {
             val shoulderY = add(bottom, scale(axis, VESSEL_HEIGHT * 0.92f))
             cylinderBetween3(
@@ -1136,22 +1129,11 @@ class SceneRenderer(
             )
             cyl.draw(program)
 
-            for (i in 0 until FLANGE_BOLTS) {
-                val a = i * (2f * Math.PI.toFloat() / FLANGE_BOLTS)
-                val o = add(scale(side, cos(a) * VESSEL_RADIUS * 0.98f),
-                            scale(out, sin(a) * VESSEL_RADIUS * 0.98f))
-                val c = add(top, o)
-                cylinderBetween3(
-                    add(c, scale(axis, -0.004f)), add(c, scale(axis, 0.010f)), radius = 0.006f,
-                )
-                program.setModel(model, 0.52f, 0.54f, 0.58f, specular = 0.85f, shininess = 78f)
-                cyl.draw(program)
-            }
         }
 
         // Steel hoops banding the glass, which is what stops a clear tube reading as a plain
         // cylinder and gives the vessel its scale.
-        listOf(0.30f, 0.70f).forEach { f ->
+        listOf(0.44f).forEach { f ->
             val y = add(bottom, scale(axis, VESSEL_HEIGHT * f))
             cylinderBetween3(
                 add(y, scale(axis, -0.005f)), add(y, scale(axis, 0.005f)),
@@ -1512,14 +1494,27 @@ class SceneRenderer(
             )
             cyl.draw(program)
 
+            // Cover plate over the middle of it (change 46).
+            //
+            // The lit part above is a CYLINDER, and its flat cap faces the camera -- so what read
+            // as a "lit rim" was a filled cyan disc 0.108 across, the most saturated thing in the
+            // frame and the last reason the head still looked blue. Capping it leaves only the
+            // outer 0.005 showing, which is the ring it was always supposed to be.
+            val cover = add(face, scale(side, 0.001f * sgn))
+            cylinderBetween3(cover, add(cover, scale(side, 0.005f * sgn)), radius = PUMP_RADIUS * 0.87f)
+            program.setModel(model, JOINT[0], JOINT[1], JOINT[2],
+                             specular = 1f, shininess = 140f, rim = 0.5f)
+            cyl.draw(program)
+
             // Bolt ring on the cover plate.
             for (i in 0 until PUMP_BOLTS) {
                 val a = i * (2f * Math.PI.toFloat() / PUMP_BOLTS)
-                val o = add(scale(pumpOut, cos(a) * PUMP_RADIUS * 0.74f),
-                            scale(pumpUp, sin(a) * PUMP_RADIUS * 0.74f))
+                val o = add(scale(pumpOut, cos(a) * PUMP_RADIUS * 0.66f),
+                            scale(pumpUp, sin(a) * PUMP_RADIUS * 0.66f))
                 val c = add(face, o)
-                cylinderBetween3(c, add(c, scale(side, 0.010f * sgn)), radius = 0.006f)
-                program.setModel(model, 0.50f, 0.52f, 0.56f, specular = 0.85f, shininess = 78f)
+                cylinderBetween3(c, add(c, scale(side, 0.011f * sgn)), radius = 0.0048f)
+                program.setModel(model, MACHINED[0], MACHINED[1], MACHINED[2],
+                                 specular = 1f, shininess = 124f, rim = 0.5f)
                 cyl.draw(program)
             }
         }
@@ -2114,10 +2109,26 @@ class SceneRenderer(
          * Kept a touch blue rather than neutral: a cool black reads as blued steel next to a warm
          * red, where a neutral one reads as a hole.
          */
-        val JOINT = floatArrayOf(0.075f, 0.080f, 0.095f)
+        val JOINT = floatArrayOf(0.045f, 0.047f, 0.052f)
 
         /** A step up from [JOINT], for machined faces that must separate from the black around them. */
-        val MACHINED = floatArrayOf(0.140f, 0.148f, 0.170f)
+        val MACHINED = floatArrayOf(0.105f, 0.109f, 0.118f)
+
+        /**
+         * Polished bezel, replacing the neon ring that used to sit on each pivot (change 46).
+         *
+         * The joints still read BLUE, and the pigment was never the reason -- a cyan ring the full
+         * width of the drive housing was the largest single feature on every axis, so whatever
+         * colour the casting under it was, the joint was a blue disc. Colour cannot fix a
+         * composition problem. The ring is now dark chrome: it still catches a hard highlight at
+         * the same place, which is what gave the pivot its edge, but the axis reads as black
+         * polished metal with a bright rim rather than as a light.
+         *
+         * The lights are not gone from the machine, only from the pivots -- the bearing band, the
+         * A6 split line, the pump and the vessel still carry the accent, which is where it belongs:
+         * on the parts that are actually doing something.
+         */
+        val BEZEL = floatArrayOf(0.30f, 0.31f, 0.33f)
 
         // The arm as a mechanism (change 40).
         /** Fraction of a member's length taken by its heavy root collar. */
@@ -2201,7 +2212,7 @@ class SceneRenderer(
         const val RAM_BARREL = 0.52f
 
         const val JOINT_BOLTS = 8
-        const val PUMP_BOLTS = 10
+        const val PUMP_BOLTS = 6
 
         // The vessel-to-pump service wire (change 39).
         const val WIRE_SEGMENTS = 9

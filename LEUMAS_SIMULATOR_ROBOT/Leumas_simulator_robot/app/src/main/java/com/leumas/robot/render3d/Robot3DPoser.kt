@@ -239,14 +239,24 @@ class Robot3DPoser {
             else -> 1f
         }
 
-        // A visible wrist roll: twist in to engage while picking, hold through the carry, untwist
-        // as it places. This is the A4 axis the reference machine rolls the end effector on.
+        // THE A6 INDEX, and when it is allowed to happen (change 46).
+        //
+        // This axis was rolling 0.9 rad -- 51.6 degrees -- of the ENTIRE head, vessel, pump and
+        // housing together, on every pick, through the whole carry, and back again on every place.
+        // Almost none of that was work. A gravity fill from a macro overhead does not care which
+        // way the tool is facing; nothing about picking requires the head to be turned at all, and
+        // rolling it there was the machine moving an axis because it could.
+        //
+        // The one leg that genuinely needs it is the placing leg: the valve discharges sideways,
+        // and it has to be brought round to face the module's wall before material is pumped into
+        // it. So the index runs there and nowhere else -- brought round on the approach, held while
+        // discharging, unwound on the retract -- and it is a fifth of the angle it was, eased over
+        // a whole phase rather than snatched, so what is left reads as the head being indexed
+        // rather than as the tool spinning.
         val wristRoll = when (phase) {
-            RobotPhase.PICKING -> lerp(0f, -WRIST_ROLL, motion)
-            RobotPhase.LIFTING,
-            RobotPhase.MOVING_TO_DESTINATION,
-            RobotPhase.POSITIONING_AT_DESTINATION -> -WRIST_ROLL
-            RobotPhase.PLACING -> lerp(-WRIST_ROLL, 0f, motion)
+            RobotPhase.POSITIONING_AT_DESTINATION -> lerp(0f, -WRIST_ROLL, motion)
+            RobotPhase.PLACING -> -WRIST_ROLL
+            RobotPhase.RETRACTING -> lerp(-WRIST_ROLL, 0f, motion)
             else -> 0f
         }
 
@@ -543,7 +553,13 @@ class Robot3DPoser {
     }
 
     private companion object {
-        const val WRIST_ROLL = 0.9f
+        /**
+         * How far the A6 axis indexes the head, in radians (change 46).
+         *
+         * 0.18 rad is about 10 degrees. It was 0.9 -- 51.6 degrees -- which is not an index, it is
+         * a spin, and at that size it dragged the eye off the arm every time it happened.
+         */
+        const val WRIST_ROLL = 0.18f
         const val UNSET = Long.MIN_VALUE
 
         /** Filter time constant. Short enough to track, long enough to round off phase corners. */
