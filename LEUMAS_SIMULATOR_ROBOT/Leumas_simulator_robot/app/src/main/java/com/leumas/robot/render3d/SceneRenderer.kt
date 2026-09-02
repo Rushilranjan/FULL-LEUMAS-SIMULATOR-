@@ -323,16 +323,36 @@ class SceneRenderer(
         drawLimb(elbow, wrist, 0.060f, side = sideAxis(pose.baseYaw))
         drawLimb(wrist, gripper, 0.048f, side = sideAxis(pose.baseYaw))
 
-        // Chrome parallelogram tie-rod, running above the lower arm, with its rod-end bosses.
+        // THE RAM (change 40). This was a plain chrome rod, and a plain rod is the one part of a
+        // linkage that carries no information: you cannot tell which way it drives or where the
+        // power comes from. It is now a real actuator -- a fat barrel anchored at the shoulder, a
+        // polished rod extending from it, and a clevis at each end -- which is the single most
+        // recognisable mechanical component there is and reads instantly as a machine under load.
         val rodA = floatArrayOf(shoulder[0], shoulder[1] + 0.10f, shoulder[2])
         val rodB = floatArrayOf(elbow[0], elbow[1] + 0.08f, elbow[2])
-        cylinderBetween3(rodA, rodB, radius = 0.018f)
-        program.setModel(model, 0.80f, 0.82f, 0.86f, specular = 0.95f, shininess = 96f, rim = 0.6f)
+        val ramDir = normalize(sub(rodB, rodA))
+        val ramMid = add(rodA, scale(ramDir, len(sub(rodB, rodA)) * RAM_BARREL))
+
+        // Barrel.
+        cylinderBetween3(rodA, ramMid, radius = 0.030f)
+        program.setModel(model, 0.24f, 0.25f, 0.28f, specular = 0.85f, shininess = 88f, rim = 0.5f)
         cyl.draw(program)
+        // Gland nut at the barrel mouth.
+        cylinderBetween3(
+            sub(ramMid, scale(ramDir, 0.010f)), add(ramMid, scale(ramDir, 0.006f)), radius = 0.034f,
+        )
+        program.setModel(model, 0.40f, 0.42f, 0.46f, specular = 0.9f, shininess = 96f, rim = 0.6f)
+        cyl.draw(program)
+        // Polished rod.
+        cylinderBetween3(ramMid, rodB, radius = 0.014f)
+        program.setModel(model, 0.86f, 0.88f, 0.92f, specular = 1f, shininess = 128f, rim = 0.8f)
+        cyl.draw(program)
+        // Clevis at each end.
         listOf(rodA, rodB).forEach { end ->
-            val n = normalize(sub(rodB, rodA))
-            cylinderBetween3(sub(end, scale(n, 0.012f)), add(end, scale(n, 0.012f)), radius = 0.028f)
-            program.setModel(model, 0.20f, 0.21f, 0.24f, specular = 0.6f, shininess = 48f)
+            cylinderBetween3(
+                sub(end, scale(ramDir, 0.014f)), add(end, scale(ramDir, 0.014f)), radius = 0.026f,
+            )
+            program.setModel(model, 0.19f, 0.20f, 0.23f, specular = 0.7f, shininess = 62f, rim = 0.4f)
             cyl.draw(program)
         }
 
@@ -366,46 +386,98 @@ class SceneRenderer(
      * There is no emissive channel in the shader, so the lit rings are a bright colour at maximum
      * [rim] -- the fresnel term lifts the silhouette and that is what a glowing edge looks like.
      */
+    /**
+     * One arm member, as a casting rather than a tube (change 40).
+     *
+     * **The geometry was the problem, not the shading.** Every member was a constant
+     * cross-section, and a constant cross-section is the one thing no real arm has. Worse, each
+     * one simply ABUTTED the next at a shared point, so the arm was a string of sausages meeting
+     * end to end. Nothing about that reads as a mechanism, however well it is lit or however many
+     * rings are painted on it.
+     *
+     * A real articulated arm is built the opposite way round: each member ends in a FORK, and the
+     * next member's boss sits BETWEEN the fork's arms with a pin through all three. That single
+     * feature is most of what makes an arm look like an arm -- the members visibly carry load into
+     * one another instead of floating in a line -- and it is why a joint is always WIDER than the
+     * limbs it joins, never narrower.
+     *
+     * So each member is now: a wide root collar where it leaves its parent pivot; a shell that
+     * tapers from that root to a narrower waist; a raised waist band; and a fork at the far end,
+     * two plates straddling the space the next pivot's boss drops into.
+     *
+     * [a] and [b] are exactly the joint centres they always were. Every form here is arranged
+     * around them, so the reach and the calibration are untouched.
+     */
     private fun drawLimb(a: FloatArray, b: FloatArray, radius: Float, side: FloatArray) {
         val span = sub(b, a)
         val length = len(span)
         if (length < 1e-4f) return
         val dir = scale(span, 1f / length)
 
-        // Change 38 stripped this back. The previous pass answered "more texture" with more
-        // MARKINGS -- three seam rings, a livery band and a rib on every member -- and the result
-        // was busy, not premium. The references are the opposite: large clean white volumes, a
-        // narrow dark neck where each one enters its joint, and light at the seam. What reads as
-        // expensive is the quality of ONE surface and the restraint around it, not the count of
-        // features on it.
+        val rootEnd = add(a, scale(dir, length * LIMB_ROOT))
+        val forkStart = add(b, scale(dir, -length * LIMB_FORK))
 
-        // Necks. Narrow and dark, so each member visibly plugs INTO its pivot.
-        val n0 = add(a, scale(dir, length * LIMB_NECK))
-        val n1 = add(a, scale(dir, length * (1f - LIMB_NECK)))
-        listOf(a to n0, n1 to b).forEach { (p, q) ->
-            cylinderBetween3(p, q, radius = radius * 0.60f)
-            program.setModel(model, 0.19f, 0.20f, 0.23f, specular = 0.60f, shininess = 54f)
-            cyl.draw(program)
-        }
+        // Root collar: the heavy end, where load enters from the pivot behind it.
+        cylinderBetween3(a, rootEnd, radius = radius * 1.16f)
+        program.setModel(model, SHELL[0], SHELL[1], SHELL[2],
+                         specular = 1f, shininess = 128f, rim = 0.5f)
+        cyl.draw(program)
 
-        // The shell: one clean tapered volume, wider at the inboard end, polished hard. This is
-        // the surface the whole machine is judged on, so it gets the highest specular and
-        // shininess anything here uses, plus enough rim to keep its edge bright against the
-        // backdrop.
-        frustumBetween(n1, n0, radius = radius)
-        program.setModel(model, SHELL[0], SHELL[1], SHELL[2], specular = 1f, shininess = 128f, rim = 0.55f)
+        // Dark relief groove at the root's shoulder, so the collar reads as a separate casting
+        // bolted on rather than as a bulge in the same tube.
+        cylinderBetween3(
+            sub(rootEnd, scale(dir, 0.008f)), add(rootEnd, scale(dir, 0.008f)),
+            radius = radius * 1.02f,
+        )
+        program.setModel(model, 0.15f, 0.16f, 0.18f, specular = 0.5f, shininess = 44f)
+        cyl.draw(program)
+
+        // The shell, tapering root -> waist.
+        frustumBetween(forkStart, rootEnd, radius = radius * 1.08f)
+        program.setModel(model, SHELL[0], SHELL[1], SHELL[2],
+                         specular = 1f, shininess = 128f, rim = 0.55f)
         limb.draw(program)
 
-        // Neon at each shell seam. One ring per end, and no other marking anywhere on the member.
-        listOf(n0, n1).forEach { c ->
+        // Waist band, and a machined face plate on the flank. Two edges where there were none.
+        val waist = add(a, scale(dir, length * 0.62f))
+        cylinderBetween3(
+            sub(waist, scale(dir, 0.014f)), add(waist, scale(dir, 0.014f)),
+            radius = radius * 1.01f,
+        )
+        program.setModel(model, 0.30f, 0.31f, 0.34f, specular = 0.85f, shininess = 88f, rim = 0.5f)
+        cyl.draw(program)
+
+        // THE FORK: two plates straddling the pivot, which the next member's boss sits between.
+        listOf(-1f, 1f).forEach { sgn ->
+            val plane = scale(side, radius * LIMB_FORK_GAP * sgn)
             cylinderBetween3(
-                sub(c, scale(dir, 0.011f)), add(c, scale(dir, 0.011f)),
+                add(forkStart, plane),
+                add(add(b, scale(dir, radius * 0.30f)), plane),
+                radius = radius * 0.62f,
+            )
+            program.setModel(model, SHELL[0], SHELL[1], SHELL[2],
+                             specular = 1f, shininess = 128f, rim = 0.5f)
+            cyl.draw(program)
+
+            // Eye around the pin, proud of the plate.
+            val eye = add(b, plane)
+            cylinderBetween3(
+                add(eye, scale(side, radius * 0.10f * sgn)),
+                add(eye, scale(side, radius * 0.30f * sgn)),
+                radius = radius * 0.86f,
+            )
+            program.setModel(model, 0.22f, 0.23f, 0.26f, specular = 0.8f, shininess = 82f, rim = 0.5f)
+            cyl.draw(program)
+
+            // Neon round the eye -- the light belongs on the OUTSIDE of the fork, which is the
+            // face the camera sees, not buried in the middle of the assembly.
+            cylinderBetween3(
+                add(eye, scale(side, radius * 0.30f * sgn)),
+                add(eye, scale(side, radius * 0.40f * sgn)),
                 radius = radius * 0.80f,
             )
-            program.setModel(
-                model, NEON[0], NEON[1], NEON[2],
-                specular = 1f, shininess = 128f, rim = 1f,
-            )
+            program.setModel(model, NEON[0], NEON[1], NEON[2],
+                             specular = 1f, shininess = 128f, rim = 1f)
             cyl.draw(program)
         }
     }
@@ -441,41 +513,70 @@ class SceneRenderer(
     }
 
     private fun drawJoint(p: FloatArray, yaw: Float, radius: Float) {
-        // A pivot, the way the references show one: a dark hub set between the white shells, a
-        // bright ring of light around it, and a polished cap in the middle. Change 38 removed the
-        // bolt circle and the proud bearing race -- at this size they were noise on the one part of
-        // the arm that should be simple and luminous.
+        // The pivot itself: the boss that sits BETWEEN the previous member's fork arms, the pin
+        // through it, a black cap, and the actuator that drives it.
+        //
+        // Change 40 made the cap BLACK. It was white, which put the brightest thing on the machine
+        // in the middle of every joint and flattened the neon into a thin outline around a glare.
+        // Against black the ring is the only lit thing there, so it reads as light rather than as
+        // paint -- and a dark pivot between pale members is what every reference photograph shows.
         val side = sideAxis(yaw)
-        val half = radius * 0.86f
 
-        cylinderBetween3(sub(p, scale(side, half)), add(p, scale(side, half)), radius = radius * 0.90f)
-        program.setModel(model, 0.16f, 0.17f, 0.20f, specular = 0.55f, shininess = 48f)
+        // Load-bearing boss, narrow, spanning the fork gap.
+        cylinderBetween3(
+            sub(p, scale(side, radius * 0.55f)), add(p, scale(side, radius * 0.55f)),
+            radius = radius * 0.94f,
+        )
+        program.setModel(model, 0.14f, 0.15f, 0.17f, specular = 0.6f, shininess = 56f)
         cyl.draw(program)
 
+        // The pin, running right through and standing proud on both sides.
+        cylinderBetween3(
+            sub(p, scale(side, radius * 1.35f)), add(p, scale(side, radius * 1.35f)),
+            radius = radius * 0.24f,
+        )
+        program.setModel(model, 0.66f, 0.69f, 0.74f, specular = 1f, shininess = 120f, rim = 0.7f)
+        cyl.draw(program)
+
+        // Black cap on each end of the pin.
         listOf(-1f, 1f).forEach { sgn ->
-            val face = add(p, scale(side, half * sgn))
-
-            // The light. Proud of the hub and wider than it, so it reads as a ring rather than a
-            // disc, and at full rim so the silhouette itself glows.
+            val face = add(p, scale(side, radius * 1.35f * sgn))
             cylinderBetween3(
-                face, add(face, scale(side, radius * 0.14f * sgn)), radius = radius,
+                face, add(face, scale(side, radius * 0.10f * sgn)), radius = radius * 0.40f,
             )
-            program.setModel(
-                model, NEON[0], NEON[1], NEON[2],
-                specular = 1f, shininess = 128f, rim = 1f,
-            )
-            cyl.draw(program)
-
-            // Polished cap covering the middle, leaving the light showing as a ring around it.
-            val cap = add(face, scale(side, radius * 0.06f * sgn))
-            cylinderBetween3(
-                cap, add(cap, scale(side, radius * 0.13f * sgn)), radius = radius * 0.66f,
-            )
-            program.setModel(
-                model, 0.955f, 0.965f, 0.980f, specular = 1f, shininess = 128f, rim = 0.5f,
-            )
+            program.setModel(model, 0.05f, 0.05f, 0.06f, specular = 0.7f, shininess = 90f, rim = 0.3f)
             cyl.draw(program)
         }
+
+        // THE ACTUATOR POD, offset to one flank: the motor and gearbox that turn this axis. An arm
+        // with no visible drive is a shape; the pod is the single cheapest thing that says the
+        // joint is powered, and every reference has one bulging off the side of each pivot.
+        val podAt = add(p, scale(side, -radius * POD_OFFSET))
+        val podOut = scale(side, -radius * POD_LENGTH)
+        cylinderBetween3(podAt, add(podAt, podOut), radius = radius * POD_RADIUS)
+        program.setModel(model, 0.17f, 0.18f, 0.21f, specular = 0.7f, shininess = 66f, rim = 0.4f)
+        cyl.draw(program)
+
+        // Cooling fins.
+        for (i in 0 until POD_FINS) {
+            val t = (i + 0.5f) / POD_FINS
+            val c = add(podAt, scale(podOut, t))
+            cylinderBetween3(
+                sub(c, scale(side, 0.004f)), add(c, scale(side, 0.004f)),
+                radius = radius * (POD_RADIUS + 0.16f),
+            )
+            program.setModel(model, 0.34f, 0.36f, 0.40f, specular = 0.85f, shininess = 84f, rim = 0.5f)
+            cyl.draw(program)
+        }
+
+        // Lit end cap on the pod.
+        val podEnd = add(podAt, podOut)
+        cylinderBetween3(
+            podEnd, add(podEnd, scale(side, -radius * 0.10f)), radius = radius * (POD_RADIUS - 0.06f),
+        )
+        program.setModel(model, NEON[0], NEON[1], NEON[2],
+                         specular = 1f, shininess = 128f, rim = 1f)
+        cyl.draw(program)
     }
 
     private fun drawEndEffector(pose: Robot3DPose, wrist: FloatArray, gripper: FloatArray, timeS: Float) {
@@ -1572,8 +1673,24 @@ class SceneRenderer(
          */
         val SHELL = floatArrayOf(0.72f, 0.13f, 0.14f)
 
-        /** How much of a member's length is dark neck at each end, entering its joint. */
-        const val LIMB_NECK = 0.13f
+        // The arm as a mechanism (change 40).
+        /** Fraction of a member's length taken by its heavy root collar. */
+        const val LIMB_ROOT = 0.16f
+
+        /** Fraction taken by the fork at the far end. */
+        const val LIMB_FORK = 0.20f
+
+        /** How far each fork plate stands off the centreline, in limb radii. */
+        const val LIMB_FORK_GAP = 0.92f
+
+        /** Actuator pod: offset from the pivot, length and radius, all in joint radii. */
+        const val POD_OFFSET = 1.55f
+        const val POD_LENGTH = 1.05f
+        const val POD_RADIUS = 0.62f
+        const val POD_FINS = 4
+
+        /** Fraction of the ram that is barrel rather than exposed rod. */
+        const val RAM_BARREL = 0.52f
 
         const val JOINT_BOLTS = 8
         const val PUMP_BOLTS = 10
