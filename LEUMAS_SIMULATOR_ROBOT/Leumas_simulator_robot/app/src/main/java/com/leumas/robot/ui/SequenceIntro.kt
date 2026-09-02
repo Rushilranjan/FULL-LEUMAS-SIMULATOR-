@@ -320,9 +320,7 @@ private fun RecipeCard(recipe: Recipe, modifier: Modifier = Modifier) {
             // visibly off each other's axis. Matching it is what makes them line up.
             Text(
                 text = recipe.name,
-                // Neon rather than ink (change 38): it is the one line on the card that names what
-                // is about to run, and it now matches the light on the machine behind it.
-                color = LeumasColors.NeonAqua,
+                color = LeumasColors.OnSurface,
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace,

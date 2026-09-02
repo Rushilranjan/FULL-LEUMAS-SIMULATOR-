@@ -264,7 +264,7 @@ class SceneRenderer(
         // machine fighting the shell for attention, and in the references this casting is the
         // largest clean surface on the whole arm.
         modelBox(cx, Arena3D.SHOULDER_Y - 0.06f, 0f, 0.24f, 0.22f, 0.22f, yawDeg = yawDeg)
-        program.setModel(model, 0.950f, 0.960f, 0.975f, specular = 1f, shininess = 120f, rim = 0.45f)
+        program.setModel(model, SHELL[0], SHELL[1], SHELL[2], specular = 1f, shininess = 120f, rim = 0.45f)
         box.draw(program)
 
         // A neon band round the turret's base, where it meets the slewing ring.
@@ -393,7 +393,7 @@ class SceneRenderer(
         // shininess anything here uses, plus enough rim to keep its edge bright against the
         // backdrop.
         frustumBetween(n1, n0, radius = radius)
-        program.setModel(model, 0.955f, 0.965f, 0.980f, specular = 1f, shininess = 128f, rim = 0.55f)
+        program.setModel(model, SHELL[0], SHELL[1], SHELL[2], specular = 1f, shininess = 128f, rim = 0.55f)
         limb.draw(program)
 
         // Neon at each shell seam. One ring per end, and no other marking anywhere on the member.
@@ -714,6 +714,46 @@ class SceneRenderer(
         // falling stream. That is what is being moved, not what moves it.
         val nozzle =
             drawPeristalticHead(hopperTip, out, side, axis, forward(pose.baseYaw), payload)
+
+        // The service wire from the vessel body down to the pump (change 39). Every dosing head
+        // has one -- the drive and the level sensor have to be wired to something -- and its
+        // absence is the sort of thing the eye notices without being able to name: a pump running
+        // with nothing connected to it. Bowed outward so it stands off the vessel wall rather than
+        // being painted on it.
+        run {
+            val anchor = add(
+                add(bottom, scale(axis, VESSEL_HEIGHT * 0.58f)),
+                scale(out, VESSEL_RADIUS * 0.94f),
+            )
+            val head = add(hopperTip, scale(axis, -PUMP_RADIUS * 0.55f))
+            val bow = add(
+                add(anchor, scale(axis, -VESSEL_HEIGHT * 0.42f)),
+                scale(out, WIRE_BOW),
+            )
+            var previous = anchor
+            for (i in 1..WIRE_SEGMENTS) {
+                val t = i.toFloat() / WIRE_SEGMENTS
+                val inv = 1f - t
+                val p = floatArrayOf(
+                    inv * inv * anchor[0] + 2f * inv * t * bow[0] + t * t * head[0],
+                    inv * inv * anchor[1] + 2f * inv * t * bow[1] + t * t * head[1],
+                    inv * inv * anchor[2] + 2f * inv * t * bow[2] + t * t * head[2],
+                )
+                cylinderBetween3(previous, p, radius = WIRE_RADIUS)
+                program.setModel(model, 0.10f, 0.10f, 0.12f, specular = 0.45f, shininess = 34f, rim = 0.4f)
+                cyl.draw(program)
+                previous = p
+            }
+            // Gland where it enters the vessel, and again at the pump.
+            listOf(anchor, head).forEach { c ->
+                cylinderBetween3(
+                    add(c, scale(out, -0.008f)), add(c, scale(out, 0.008f)),
+                    radius = WIRE_RADIUS * 2.1f,
+                )
+                program.setModel(model, 0.42f, 0.44f, 0.48f, specular = 0.8f, shininess = 70f)
+                cyl.draw(program)
+            }
+        }
 
         // -- material transfer -----------------------------------------------------------------------
 
@@ -1522,11 +1562,26 @@ class SceneRenderer(
         /** Legacy alias: the pump and vessel lights use the same neon. */
         val ACCENT = NEON
 
+        /**
+         * The shell colour (change 39).
+         *
+         * A deep warm red rather than a primary one: pure red reads as plastic under this lighting
+         * because the green and blue channels go to nothing and the shading gradient has only one
+         * channel left to work in. Keeping a little of both leaves the form legible on the shadow
+         * side, which is exactly where the machine has to look solid.
+         */
+        val SHELL = floatArrayOf(0.72f, 0.13f, 0.14f)
+
         /** How much of a member's length is dark neck at each end, entering its joint. */
         const val LIMB_NECK = 0.13f
 
         const val JOINT_BOLTS = 8
         const val PUMP_BOLTS = 10
+
+        // The vessel-to-pump service wire (change 39).
+        const val WIRE_SEGMENTS = 9
+        const val WIRE_RADIUS = 0.007f
+        const val WIRE_BOW = 0.055f
         const val FLANGE_BOLTS = 8
         const val CABLE_SEGMENTS = 10
         const val CABLE_RADIUS = 0.009f

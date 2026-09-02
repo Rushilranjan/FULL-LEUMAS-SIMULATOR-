@@ -154,21 +154,62 @@ class GlProgram {
             uniform float uAlpha;   // change 13.8: translucent liquid
             uniform float uRim;     // change 14.4: Fresnel sheen for metal
             out vec4 fragColor;
+
+            // Change 39. The machine was not reading as three-dimensional and the geometry was
+            // never the reason -- the LIGHTING was flat, in one specific and fixable way.
+            //
+            // Ambient was a CONSTANT. Every surface facing away from the key light received
+            // exactly the same 0.46 regardless of which way it pointed, so the whole shadow side
+            // of every curved part was one uniform tone. That is the definition of flat: half of
+            // every cylinder carried no shape information at all. Real ambient arrives from an
+            // environment and therefore varies with the normal -- bright from the sky above,
+            // darker and warmer from the floor bounce below.
+            //
+            // Replacing the constant with a hemisphere costs two mixes and gives every surface a
+            // vertical gradient it did not have. It is the single biggest change here.
+            //
+            // The average is deliberately held near the old 0.46 so exposure does not shift; what
+            // changes is that it now VARIES. And the key is warm while the fill is cool, which is
+            // how any studio lights a product: the colour difference between lit and unlit sides
+            // separates form far more strongly than a brightness difference alone.
+            const vec3 SKY_AMBIENT    = vec3(0.55, 0.60, 0.70);
+            const vec3 GROUND_AMBIENT = vec3(0.31, 0.29, 0.27);
+            const vec3 KEY_COLOUR     = vec3(1.00, 0.97, 0.92);
+            const vec3 FILL_COLOUR    = vec3(0.40, 0.50, 0.66);
+            const vec3 FILL_DIR       = vec3(0.55, 0.35, 0.75);
+
             void main() {
                 vec3 n = normalize(vNormal);
                 vec3 l = normalize(-uLightDir);
-                float diff = max(dot(n, l), 0.0);
                 vec3 v = normalize(uViewPos - vWorldPos);
                 vec3 h = normalize(l + v);
-                float spec = pow(max(dot(n, h), 0.0), uShininess) * uSpecular;
-                // A soft fill from the opposite side keeps shadowed faces from going pure black.
-                float fill = max(dot(n, normalize(vec3(0.3, 0.2, 1.0))), 0.0) * 0.18;
-                vec3 color = uColor * (uAmbient + diff * 0.85 + fill) + vec3(spec);
+
+                // Hemisphere ambient, scaled so the mean matches the old flat term.
+                vec3 ambient = mix(GROUND_AMBIENT, SKY_AMBIENT, n.y * 0.5 + 0.5)
+                             * (uAmbient / 0.46);
+
+                float diff = max(dot(n, l), 0.0);
+                vec3 key = KEY_COLOUR * diff * 0.82;
+
+                float fillD = max(dot(n, normalize(FILL_DIR)), 0.0);
+                vec3 fill = FILL_COLOUR * fillD * 0.30;
+
+                vec3 color = uColor * (ambient + key + fill);
+
+                // Specular weighted by Schlick's Fresnel rather than applied flat. A real highlight
+                // strengthens toward grazing angles, which is what makes a curved surface look
+                // lacquered instead of dusted with white.
+                float f0 = 0.04 + uSpecular * 0.30;
+                float fres = f0 + (1.0 - f0) * pow(1.0 - max(dot(h, v), 0.0), 5.0);
+                float spec = pow(max(dot(n, h), 0.0), uShininess) * fres * uSpecular * 2.6;
+                color += KEY_COLOUR * spec;
+
                 // Change 14.4: a Fresnel rim term. Grazing angles brighten, which is what makes a
                 // surface read as polished metal rather than as flat paint with a highlight on it.
                 // uRim is 0 for every part that does not opt in, so nothing else changes.
-                float fres = pow(1.0 - max(dot(n, v), 0.0), 3.0);
-                color += vec3(0.62, 0.68, 0.78) * fres * uRim;
+                float rim = pow(1.0 - max(dot(n, v), 0.0), 3.0);
+                color += vec3(0.62, 0.68, 0.78) * rim * uRim;
+
                 fragColor = vec4(color, uAlpha);
             }
         """
