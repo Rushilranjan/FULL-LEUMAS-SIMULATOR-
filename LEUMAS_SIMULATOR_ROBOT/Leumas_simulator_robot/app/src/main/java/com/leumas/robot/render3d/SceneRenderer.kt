@@ -37,6 +37,7 @@ class SceneRenderer(
     private lateinit var heap: Mesh
     private lateinit var hopper: Mesh
     private lateinit var limb: Mesh
+    private lateinit var column: Mesh
 
     private var aspect: Float = 1.7f
     private val startNanos = System.nanoTime()
@@ -75,6 +76,9 @@ class SceneRenderer(
         // A gently tapered tube for the arm members: real arms are not parallel-sided, and the
         // taper is most of what makes a limb read as cast rather than as pipe.
         limb = Mesh.frustum(topRadius = 0.50f, bottomRadius = 0.42f, segments = 64)
+        // A strong taper for the pedestal column (change 42). Used both ways up:
+        // narrow-end-first for the column, wide-end-first for the flare under the bearing.
+        column = Mesh.frustum(topRadius = 0.50f, bottomRadius = 0.64f, segments = 64)
         heap = Mesh.frustum(topRadius = 0.18f, bottomRadius = 0.50f, segments = 44)
         // Hopper cone: wide at the top, tapering to the dispenser inlet (change 15.1).
         hopper = Mesh.frustum(topRadius = 0.50f, bottomRadius = 0.15f, segments = 56)
@@ -245,18 +249,128 @@ class SceneRenderer(
         val cx = pose.carriageX
         val yawDeg = Math.toDegrees(pose.baseYaw.toDouble()).toFloat()
 
-        // Base pedestal (fixed, rides the carriage).
-        modelBox(cx, 0.22f, 0f, 0.32f, 0.16f, 0.30f)
-        program.setModel(model, 0.19f, 0.21f, 0.24f, specular = 0.15f, shininess = 14f)
-        box.draw(program)
-        modelBox(cx, 0.37f, 0f, 0.26f, 0.16f, 0.24f)
-        program.setModel(model, 0.22f, 0.24f, 0.27f, specular = 0.15f, shininess = 14f)
+        // ---- THE PEDESTAL (change 42) -------------------------------------------------------
+        //
+        // It was two boxes and a white disc, and two of the three were measurably wrong:
+        //
+        //   * the carriage top is y=0.120 and the lower box started at y=0.140, so the whole
+        //     pedestal -- and the robot standing on it -- was FLOATING 0.020 above the carriage
+        //     it is supposed to ride;
+        //   * the slewing ring was 0.300 across on a column 0.26 x 0.24, so it overhung its own
+        //     support by 0.020 in x and 0.030 in z, with nothing at all beneath the rim.
+        //
+        // Rebuilt bottom-up as a machine base: a bolted footplate that overlaps the carriage, a
+        // plinth, a cast column that tapers in and flares back out into the bearing housing,
+        // gussets, a junction box feeding a conduit into the column, and a slewing bearing built
+        // as an outer race, a bolt circle and an inner race instead of one white cylinder.
+        //
+        // Nothing here touches SHOULDER_Y or any calibrated coordinate: the whole assembly lives
+        // below y=0.45, which is where the turret casting starts.
+
+        // Footplate, overlapping the carriage top by 0.010 so there is no daylight under it.
+        modelBox(cx, 0.132f, 0f, 0.380f, 0.044f, 0.360f)
+        program.setModel(model, 0.16f, 0.17f, 0.19f, specular = 0.30f, shininess = 26f)
         box.draw(program)
 
-        // Slewing bearing ring (white), the A1 axis — a flat disc.
-        cylinderBetween(cx, 0.44f, 0f, cx, 0.47f, 0f, radius = 0.15f)
-        program.setModel(model, 0.88f, 0.89f, 0.91f, specular = 0.5f, shininess = 40f)
+        // Anchor bolts at the four corners: washer, then head. The single clearest signal that a
+        // machine is bolted down rather than resting on the floor.
+        listOf(-1f, 1f).forEach { sx ->
+            listOf(-1f, 1f).forEach { sz ->
+                val bx = cx + 0.158f * sx
+                val bz = 0.148f * sz
+                cylinderBetween(bx, 0.153f, bz, bx, 0.162f, bz, radius = 0.024f)
+                program.setModel(model, 0.30f, 0.32f, 0.35f, specular = 0.6f, shininess = 48f)
+                cyl.draw(program)
+                cylinderBetween(bx, 0.162f, bz, bx, 0.177f, bz, radius = 0.015f)
+                program.setModel(model, 0.54f, 0.56f, 0.60f, specular = 0.9f, shininess = 84f, rim = 0.4f)
+                cyl.draw(program)
+            }
+        }
+
+        // Plinth.
+        modelBox(cx, 0.180f, 0f, 0.320f, 0.062f, 0.300f)
+        program.setModel(model, 0.21f, 0.23f, 0.26f, specular = 0.35f, shininess = 30f)
+        box.draw(program)
+
+        // Nameplate on the plinth's front face.
+        modelBox(cx, 0.182f, 0.152f, 0.100f, 0.030f, 0.006f)
+        program.setModel(model, 0.62f, 0.64f, 0.68f, specular = 0.8f, shininess = 70f, rim = 0.4f)
+        box.draw(program)
+
+        // Cast column: 0.151 at the plinth, tapering to 0.118. The `column` mesh runs wide-end
+        // first, so `a` is the bottom of the run here.
+        frustumBetween(
+            floatArrayOf(cx, 0.205f, 0f), floatArrayOf(cx, 0.360f, 0f), radius = 0.118f,
+        )
+        program.setModel(model, 0.23f, 0.25f, 0.28f, specular = 0.55f, shininess = 52f, rim = 0.35f)
+        column.draw(program)
+
+        // Gussets: two crossed fins, standing about 0.02 proud of the taper.
+        listOf(45f, 135f).forEach { deg ->
+            modelBox(cx, 0.268f, 0f, 0.320f, 0.110f, 0.020f, yawDeg = deg)
+            program.setModel(model, 0.19f, 0.21f, 0.24f, specular = 0.45f, shininess = 40f)
+            box.draw(program)
+        }
+
+        // Flare back out into the bearing housing -- same mesh, wide end up this time.
+        frustumBetween(
+            floatArrayOf(cx, 0.400f, 0f), floatArrayOf(cx, 0.358f, 0f), radius = 0.118f,
+        )
+        program.setModel(model, 0.25f, 0.27f, 0.30f, specular = 0.6f, shininess = 56f, rim = 0.4f)
+        column.draw(program)
+
+        // Junction box on the back flank, with a conduit into the column. A powered machine has to
+        // be fed from somewhere, and on a robot that somewhere is always the pedestal.
+        modelBox(cx, 0.252f, -0.176f, 0.150f, 0.130f, 0.058f)
+        program.setModel(model, 0.15f, 0.16f, 0.18f, specular = 0.4f, shininess = 36f)
+        box.draw(program)
+        modelBox(cx, 0.292f, -0.207f, 0.086f, 0.010f, 0.004f)
+        program.setModel(model, NEON[0], NEON[1], NEON[2],
+                         specular = 1f, shininess = 128f, rim = NEON_RIM)
+        box.draw(program)
+        cylinderBetween(cx, 0.232f, -0.150f, cx, 0.232f, -0.096f, radius = 0.019f)
+        program.setModel(model, 0.13f, 0.13f, 0.15f, specular = 0.4f, shininess = 34f)
         cyl.draw(program)
+
+        // ---- the slewing bearing, the A1 axis -----------------------------------------------
+        // Outer race, sized to the flare beneath it so nothing overhangs unsupported.
+        cylinderBetween(cx, 0.398f, 0f, cx, 0.428f, 0f, radius = 0.152f)
+        program.setModel(model, 0.26f, 0.28f, 0.31f, specular = 0.7f, shininess = 64f, rim = 0.4f)
+        cyl.draw(program)
+
+        // Lit band round the housing, marking the axis.
+        cylinderBetween(cx, 0.408f, 0f, cx, 0.416f, 0f, radius = 0.156f)
+        program.setModel(model, NEON[0], NEON[1], NEON[2],
+                         specular = 1f, shininess = 128f, rim = NEON_RIM)
+        cyl.draw(program)
+
+        // Bolt circle on the race's top face.
+        for (i in 0 until 12) {
+            val ang = i * (2f * Math.PI.toFloat() / 12f)
+            val bx = cx + cos(ang) * 0.136f
+            val bz = sin(ang) * 0.136f
+            cylinderBetween(bx, 0.428f, bz, bx, 0.437f, bz, radius = 0.010f)
+            program.setModel(model, 0.52f, 0.54f, 0.58f, specular = 0.9f, shininess = 82f, rim = 0.4f)
+            cyl.draw(program)
+        }
+
+        // Inner race, and a bolt ring on it that YAWS -- so the base is visibly what turns,
+        // rather than the turret appearing to slide on a static disc.
+        cylinderBetween(cx, 0.426f, 0f, cx, 0.452f, 0f, radius = 0.122f)
+        program.setModel(model, 0.72f, 0.75f, 0.79f, specular = 0.85f, shininess = 78f, rim = 0.45f)
+        cyl.draw(program)
+        run {
+            val f0 = forward(pose.baseYaw)
+            val s0 = sideAxis(pose.baseYaw)
+            for (i in 0 until 8) {
+                val ang = i * (2f * Math.PI.toFloat() / 8f)
+                val bx = cx + (f0[0] * cos(ang) + s0[0] * sin(ang)) * 0.100f
+                val bz = (f0[2] * cos(ang) + s0[2] * sin(ang)) * 0.100f
+                cylinderBetween(bx, 0.448f, bz, bx, 0.456f, bz, radius = 0.009f)
+                program.setModel(model, 0.34f, 0.36f, 0.40f, specular = 0.8f, shininess = 72f)
+                cyl.draw(program)
+            }
+        }
 
         // Everything above the ring yaws with A1.
         // Turret casting (red).
@@ -267,11 +381,11 @@ class SceneRenderer(
         program.setModel(model, SHELL[0], SHELL[1], SHELL[2], specular = 1f, shininess = 120f, rim = 0.45f)
         box.draw(program)
 
-        // A neon band round the turret's base, where it meets the slewing ring.
-        cylinderBetween(cx, Arena3D.SHOULDER_Y - 0.165f, 0f, cx, Arena3D.SHOULDER_Y - 0.150f, 0f,
-                        radius = 0.135f)
-        program.setModel(model, NEON[0], NEON[1], NEON[2], specular = 1f, shininess = 128f, rim = NEON_RIM)
-        cyl.draw(program)
+        // The neon band that used to ring the turret's base is gone (change 42). At radius 0.135
+        // inside a casting whose half-extents are 0.120 x 0.110, and at y 0.455-0.470 inside a box
+        // spanning 0.450-0.670, the ring was a cylinder threaded THROUGH the turret -- so it broke
+        // out through the flat faces as a jagged cyan crescent. The bearing below carries the axis
+        // light now, which is where it belongs anyway: on the thing that actually rotates.
 
         // Counterweight drum, cantilevered behind the turret (in the yawed -forward direction).
         //
@@ -319,9 +433,12 @@ class SceneRenderer(
         // end and a painted band. What sells a machine at this distance is not resolution, it is
         // the number of distinct EDGES the eye can find along a surface, and a single smooth tube
         // offers exactly two.
-        drawLimb(shoulder, elbow, 0.075f, side = sideAxis(pose.baseYaw))
-        drawLimb(elbow, wrist, 0.060f, side = sideAxis(pose.baseYaw))
-        drawLimb(wrist, gripper, 0.048f, side = sideAxis(pose.baseYaw))
+        // Each member is told which pivot it roots on and which it forks around, so the clevis
+        // arithmetic above has both radii to work from. Passing them was the whole fix: the two
+        // halves could not previously agree on a fit because neither knew the other's size.
+        drawLimb(shoulder, elbow, 0.075f, J_SHOULDER, J_ELBOW, sideAxis(pose.baseYaw))
+        drawLimb(elbow, wrist, 0.060f, J_ELBOW, J_WRIST, sideAxis(pose.baseYaw))
+        drawLimb(wrist, gripper, 0.048f, J_WRIST, 0f, sideAxis(pose.baseYaw))
 
         // THE RAM (change 40). This was a plain chrome rod, and a plain rod is the one part of a
         // linkage that carries no information: you cannot tell which way it drives or where the
@@ -362,9 +479,9 @@ class SceneRenderer(
         drawCableRun(rodA, elbow, wrist)
 
         // Joint housings, each a lit bearing rather than a dark stub.
-        drawJoint(shoulder, pose.baseYaw, 0.085f)
-        drawJoint(elbow, pose.baseYaw, 0.070f)
-        drawJoint(wrist, pose.baseYaw, 0.055f)
+        drawJoint(shoulder, pose.baseYaw, J_SHOULDER)
+        drawJoint(elbow, pose.baseYaw, J_ELBOW)
+        drawJoint(wrist, pose.baseYaw, J_WRIST)
 
         drawEndEffector(pose, wrist, gripper, timeS)
     }
@@ -408,17 +525,38 @@ class SceneRenderer(
      * [a] and [b] are exactly the joint centres they always were. Every form here is arranged
      * around them, so the reach and the calibration are untouched.
      */
-    private fun drawLimb(a: FloatArray, b: FloatArray, radius: Float, side: FloatArray) {
+    private fun drawLimb(
+        a: FloatArray,
+        b: FloatArray,
+        radius: Float,
+        rootJoint: Float,
+        tipJoint: Float,
+        side: FloatArray,
+    ) {
         val span = sub(b, a)
         val length = len(span)
         if (length < 1e-4f) return
         val dir = scale(span, 1f / length)
 
-        val rootEnd = add(a, scale(dir, length * LIMB_ROOT))
-        val forkStart = add(b, scale(dir, -length * LIMB_FORK))
+        // Where the casting begins: clear of the pivot behind it, and clear of the lug that
+        // straddles that pivot. The neck spans the gap.
+        val rootStand = rootJoint * ROOT_STANDOFF
+        val rootBase = add(a, scale(dir, rootStand))
+        val rootEnd = add(rootBase, scale(dir, length * LIMB_ROOT))
+
+        // Where it ends: clear of the boss ahead of it, with the lug welding the two together.
+        val standoff = if (tipJoint > 0f) tipJoint * (BOSS_R + 0.14f) else radius * 0.9f
+        val forkStart = add(b, scale(dir, -standoff))
+
+        // Neck out of the pivot. Narrower than the clevis inner face, so it threads between the
+        // lugs without touching either of them.
+        cylinderBetween3(a, rootBase, radius = rootJoint * NECK_R)
+        program.setModel(model, 0.17f, 0.18f, 0.20f, specular = 0.6f, shininess = 56f)
+        cyl.draw(program)
 
         // Root collar: the heavy end, where load enters from the pivot behind it.
-        cylinderBetween3(a, rootEnd, radius = radius * 1.16f)
+        val rootR = radius * 1.16f
+        cylinderBetween3(rootBase, rootEnd, radius = rootR)
         program.setModel(model, SHELL[0], SHELL[1], SHELL[2],
                          specular = 1f, shininess = 128f, rim = 0.5f)
         cyl.draw(program)
@@ -427,58 +565,72 @@ class SceneRenderer(
         // bolted on rather than as a bulge in the same tube.
         cylinderBetween3(
             sub(rootEnd, scale(dir, 0.008f)), add(rootEnd, scale(dir, 0.008f)),
-            radius = radius * 1.02f,
+            radius = rootR * 0.88f,
         )
         program.setModel(model, 0.15f, 0.16f, 0.18f, specular = 0.5f, shininess = 44f)
         cyl.draw(program)
 
-        // The shell, tapering root -> waist.
-        frustumBetween(forkStart, rootEnd, radius = radius * 1.08f)
+        // The shell, tapering root -> waist. Its two end radii are known here rather than left to
+        // the mesh, so the bands below can be placed exactly proud of it instead of guessed at.
+        val shellRoot = rootR * 0.94f
+        val shellTip = shellRoot * LIMB_TAPER
+        frustumBetween(forkStart, rootEnd, radius = shellRoot)
         program.setModel(model, SHELL[0], SHELL[1], SHELL[2],
                          specular = 1f, shininess = 128f, rim = 0.55f)
         limb.draw(program)
 
-        // Waist band, and a machined face plate on the flank. Two edges where there were none.
-        val waist = add(a, scale(dir, length * 0.62f))
+        // Waist band, sitting exactly on the taper wherever along it the band falls.
+        val waist = add(rootEnd, scale(sub(forkStart, rootEnd), 0.62f))
         cylinderBetween3(
             sub(waist, scale(dir, 0.014f)), add(waist, scale(dir, 0.014f)),
-            radius = radius * 1.01f,
+            radius = (shellRoot + (shellTip - shellRoot) * 0.62f) * 1.03f,
         )
         program.setModel(model, 0.30f, 0.31f, 0.34f, specular = 0.85f, shininess = 88f, rim = 0.5f)
         cyl.draw(program)
 
-        // THE FORK: two plates straddling the pivot, which the next member's boss sits between.
-        listOf(-1f, 1f).forEach { sgn ->
-            val plane = scale(side, radius * LIMB_FORK_GAP * sgn)
-            cylinderBetween3(
-                add(forkStart, plane),
-                add(add(b, scale(dir, radius * 0.30f)), plane),
-                radius = radius * 0.62f,
-            )
+        if (tipJoint > 0f) {
+            // THE LUGS. Flat eyes whose faces are square to the pivot axis, one each side of the
+            // boss with CLEVIS_GAP of daylight between. Being discs on the pivot axis rather than
+            // rods along the member, they cannot reach across the centre-line and swallow the
+            // boss, which is exactly what the old fork rods were doing.
+            listOf(-1f, 1f).forEach { sgn ->
+                cylinderBetween3(
+                    add(b, scale(side, tipJoint * CLEVIS_IN * sgn)),
+                    add(b, scale(side, tipJoint * CLEVIS_OUT * sgn)),
+                    radius = tipJoint * LUG_R,
+                )
+                program.setModel(model, SHELL[0], SHELL[1], SHELL[2],
+                                 specular = 1f, shininess = 128f, rim = 0.5f)
+                cyl.draw(program)
+
+                // Machined relief on the outer face, just inside where the housing lands.
+                val face = add(b, scale(side, tipJoint * CLEVIS_OUT * sgn))
+                cylinderBetween3(
+                    face, add(face, scale(side, -tipJoint * 0.05f * sgn)),
+                    radius = tipJoint * (LUG_R - 0.10f),
+                )
+                program.setModel(model, 0.26f, 0.27f, 0.30f,
+                                 specular = 0.85f, shininess = 86f, rim = 0.45f)
+                cyl.draw(program)
+            }
+        } else {
+            // The last member ends at the tool, not at a pivot, so it gets a wrist flange rather
+            // than an empty clevis with nothing between its jaws.
+            val flange = add(b, scale(dir, -radius * 0.22f))
+            cylinderBetween3(flange, b, radius = radius * 1.18f)
             program.setModel(model, SHELL[0], SHELL[1], SHELL[2],
                              specular = 1f, shininess = 128f, rim = 0.5f)
             cyl.draw(program)
-
-            // Eye around the pin, proud of the plate.
-            val eye = add(b, plane)
-            cylinderBetween3(
-                add(eye, scale(side, radius * 0.06f * sgn)),
-                add(eye, scale(side, radius * 0.17f * sgn)),
-                radius = radius * 0.74f,
-            )
-            program.setModel(model, 0.22f, 0.23f, 0.26f, specular = 0.8f, shininess = 82f, rim = 0.5f)
-            cyl.draw(program)
-
-            // Neon round the eye -- the light belongs on the OUTSIDE of the fork, which is the
-            // face the camera sees, not buried in the middle of the assembly.
-            cylinderBetween3(
-                add(eye, scale(side, radius * 0.17f * sgn)),
-                add(eye, scale(side, radius * 0.23f * sgn)),
-                radius = radius * 0.70f,
-            )
-            program.setModel(model, NEON[0], NEON[1], NEON[2],
-                             specular = 1f, shininess = 128f, rim = NEON_RIM)
-            cyl.draw(program)
+            for (i in 0 until JOINT_BOLTS) {
+                val ang = i * (2f * Math.PI.toFloat() / JOINT_BOLTS)
+                val up = normalize(cross(side, dir))
+                val o = add(scale(side, cos(ang) * radius * 0.82f),
+                            scale(up, sin(ang) * radius * 0.82f))
+                val c = add(b, o)
+                cylinderBetween3(sub(c, scale(dir, 0.006f)), c, radius = radius * 0.10f)
+                program.setModel(model, 0.50f, 0.52f, 0.56f, specular = 0.85f, shininess = 78f)
+                cyl.draw(program)
+            }
         }
     }
 
@@ -513,70 +665,72 @@ class SceneRenderer(
     }
 
     private fun drawJoint(p: FloatArray, yaw: Float, radius: Float) {
-        // The pivot itself: the boss that sits BETWEEN the previous member's fork arms, the pin
-        // through it, a black cap, and the actuator that drives it.
-        //
-        // Change 40 made the cap BLACK. It was white, which put the brightest thing on the machine
-        // in the middle of every joint and flattened the neon into a thin outline around a glare.
-        // Against black the ring is the only lit thing there, so it reads as light rather than as
-        // paint -- and a dark pivot between pale members is what every reference photograph shows.
+        // The pivot's half of the clevis contract: the boss between the lugs, the pin through it,
+        // and -- on BOTH flanks now -- the drive housing seated on the lug's outer face, its neon
+        // ring, and the black cap. See the contract above for where each lands.
         val side = sideAxis(yaw)
+        val fwd = forward(yaw)
 
-        // Load-bearing boss, narrow, spanning the fork gap.
+        // Load-bearing boss, spanning the gap between the lugs with air either side of it.
         cylinderBetween3(
-            sub(p, scale(side, radius * 0.50f)), add(p, scale(side, radius * 0.50f)),
-            radius = radius * 0.84f,
+            sub(p, scale(side, radius * BOSS_HALF)), add(p, scale(side, radius * BOSS_HALF)),
+            radius = radius * BOSS_R,
         )
         program.setModel(model, 0.14f, 0.15f, 0.17f, specular = 0.6f, shininess = 56f)
         cyl.draw(program)
 
-        // The pin, running right through and standing proud on both sides.
+        // The pin, finishing flush with the lug faces rather than standing proud of them.
         cylinderBetween3(
-            sub(p, scale(side, radius * 1.02f)), add(p, scale(side, radius * 1.02f)),
-            radius = radius * 0.20f,
+            sub(p, scale(side, radius * CLEVIS_OUT)), add(p, scale(side, radius * CLEVIS_OUT)),
+            radius = radius * PIN_R,
         )
         program.setModel(model, 0.66f, 0.69f, 0.74f, specular = 1f, shininess = 120f, rim = 0.7f)
         cyl.draw(program)
 
-        // Black cap on each end of the pin.
         listOf(-1f, 1f).forEach { sgn ->
-            val face = add(p, scale(side, radius * 1.02f * sgn))
+            val face = add(p, scale(side, radius * CLEVIS_OUT * sgn))
+            val end = add(p, scale(side, radius * HOUSING_OUT * sgn))
+
+            // Drive housing: a shallow disc square to the axis, mirrored onto both flanks.
+            cylinderBetween3(face, end, radius = radius * HOUSING_R)
+            program.setModel(model, 0.17f, 0.18f, 0.21f, specular = 0.7f, shininess = 66f, rim = 0.4f)
+            cyl.draw(program)
+
+            // No cooling ribs. Three of them at 0.007 thick totalled 0.021 inside a housing only
+            // (1.14-0.92)*0.070 = 0.015 deep -- 1.4x its whole depth -- so they spilled out either
+            // end and the pivot wore a serrated collar instead of a clean disc. A shallow cover
+            // does not need fins; the bolt ring below already says it is a bolted-on housing, and
+            // leaving them off is flatter, which is the direction this was going in anyway.
+
+            // Neon ring on the housing's outer face.
             cylinderBetween3(
-                face, add(face, scale(side, radius * 0.06f * sgn)), radius = radius * 0.34f,
+                end, add(p, scale(side, radius * NEON_OUT * sgn)), radius = radius * (HOUSING_R + 0.02f),
+            )
+            program.setModel(model, NEON[0], NEON[1], NEON[2],
+                             specular = 1f, shininess = 128f, rim = NEON_RIM)
+            cyl.draw(program)
+
+            // Black cap over the pin's end.
+            cylinderBetween3(
+                add(p, scale(side, radius * NEON_OUT * sgn)),
+                add(p, scale(side, radius * CAP_OUT * sgn)),
+                radius = radius * CAP_R,
             )
             program.setModel(model, 0.05f, 0.05f, 0.06f, specular = 0.7f, shininess = 90f, rim = 0.3f)
             cyl.draw(program)
+
+            // Four bolts holding the housing to the lug, on the housing's shoulder.
+            for (i in 0 until 4) {
+                val ang = i * (Math.PI.toFloat() / 2f) + 0.4f
+                val up = normalize(cross(side, fwd))
+                val o = add(scale(fwd, cos(ang) * radius * (HOUSING_R + 0.16f)),
+                            scale(up, sin(ang) * radius * (HOUSING_R + 0.16f)))
+                val c = add(face, o)
+                cylinderBetween3(c, add(c, scale(side, radius * 0.10f * sgn)), radius = radius * 0.06f)
+                program.setModel(model, 0.50f, 0.52f, 0.56f, specular = 0.85f, shininess = 78f)
+                cyl.draw(program)
+            }
         }
-
-        // THE ACTUATOR POD, offset to one flank: the motor and gearbox that turn this axis. An arm
-        // with no visible drive is a shape; the pod is the single cheapest thing that says the
-        // joint is powered, and every reference has one bulging off the side of each pivot.
-        val podAt = add(p, scale(side, -radius * POD_OFFSET))
-        val podOut = scale(side, -radius * POD_LENGTH)
-        cylinderBetween3(podAt, add(podAt, podOut), radius = radius * POD_RADIUS)
-        program.setModel(model, 0.17f, 0.18f, 0.21f, specular = 0.7f, shininess = 66f, rim = 0.4f)
-        cyl.draw(program)
-
-        // Cooling fins.
-        for (i in 0 until POD_FINS) {
-            val t = (i + 0.5f) / POD_FINS
-            val c = add(podAt, scale(podOut, t))
-            cylinderBetween3(
-                sub(c, scale(side, 0.004f)), add(c, scale(side, 0.004f)),
-                radius = radius * (POD_RADIUS + 0.06f),
-            )
-            program.setModel(model, 0.34f, 0.36f, 0.40f, specular = 0.85f, shininess = 84f, rim = 0.5f)
-            cyl.draw(program)
-        }
-
-        // Lit end cap on the pod.
-        val podEnd = add(podAt, podOut)
-        cylinderBetween3(
-            podEnd, add(podEnd, scale(side, -radius * 0.10f)), radius = radius * (POD_RADIUS - 0.06f),
-        )
-        program.setModel(model, NEON[0], NEON[1], NEON[2],
-                         specular = 1f, shininess = 128f, rim = NEON_RIM)
-        cyl.draw(program)
     }
 
     private fun drawEndEffector(pose: Robot3DPose, wrist: FloatArray, gripper: FloatArray, timeS: Float) {
@@ -822,14 +976,22 @@ class SceneRenderer(
         // with nothing connected to it. Bowed outward so it stands off the vessel wall rather than
         // being painted on it.
         run {
+            // Change 42: it leaves the vessel at the BOTTOM. It was anchored 58% of the way up
+            // the wall, which is nowhere a wire ever enters a vessel -- the gland is on the bottom
+            // flange, beside the thing it feeds. Off the bottom the run is short and direct, the
+            // wall above stays clean, and the cable reads as SERVING the pump rather than as being
+            // draped down the side of the tank past it.
             val anchor = add(
-                add(bottom, scale(axis, VESSEL_HEIGHT * 0.58f)),
-                scale(out, VESSEL_RADIUS * 0.94f),
+                add(bottom, scale(axis, VESSEL_HEIGHT * 0.04f)),
+                scale(out, VESSEL_RADIUS * 0.97f),
             )
-            val head = add(hopperTip, scale(axis, -PUMP_RADIUS * 0.55f))
+            val head = add(hopperTip, scale(axis, PUMP_RADIUS * 0.18f))
             val bow = add(
-                add(anchor, scale(axis, -VESSEL_HEIGHT * 0.42f)),
-                scale(out, WIRE_BOW),
+                add(anchor, scale(axis, -HOPPER_HEIGHT * 0.50f)),
+                // Bowed clear of the cone rather than hugging it: the hopper tapers from the
+                // vessel radius down to the pump, so a cable running straight between those two
+                // points stays inside its silhouette the whole way and is never actually seen.
+                scale(out, WIRE_BOW * 0.85f),
             )
             var previous = anchor
             for (i in 1..WIRE_SEGMENTS) {
@@ -845,10 +1007,11 @@ class SceneRenderer(
                 cyl.draw(program)
                 previous = p
             }
-            // Gland where it enters the vessel, and again at the pump.
-            listOf(anchor, head).forEach { c ->
+            // A gland at each end, each on the axis its cable actually enters along: radial
+            // into the vessel's bottom flange, axial into the pump body.
+            listOf(anchor to out, head to axis).forEach { (c, n) ->
                 cylinderBetween3(
-                    add(c, scale(out, -0.008f)), add(c, scale(out, 0.008f)),
+                    add(c, scale(n, -0.008f)), add(c, scale(n, 0.008f)),
                     radius = WIRE_RADIUS * 2.1f,
                 )
                 program.setModel(model, 0.42f, 0.44f, 0.48f, specular = 0.8f, shininess = 70f)
@@ -1687,24 +1850,79 @@ class SceneRenderer(
         /** Fraction of a member's length taken by its heavy root collar. */
         const val LIMB_ROOT = 0.16f
 
-        /** Fraction taken by the fork at the far end. */
-        const val LIMB_FORK = 0.20f
+        /** The `limb` frustum's own taper (0.42/0.50), needed to place bands exactly on it. */
+        const val LIMB_TAPER = 0.84f
 
-        /** How far each fork plate stands off the centreline, in limb radii. */
-        const val LIMB_FORK_GAP = 0.92f
+        // ---- THE CLEVIS CONTRACT (change 42) ----------------------------------------------
+        //
+        // The pivots were merging into the members, and the reason was that NOTHING TIED THE TWO
+        // HALVES TOGETHER. drawLimb sized its fork from the LIMB radius, drawJoint sized its boss
+        // from the JOINT radius, and those are different numbers at every axis -- so the fit was
+        // whatever the two happened to work out to. Measured:
+        //
+        //     elbow   fork inner face 0.0225   boss face 0.0350   -> 0.0125 of solid overlap
+        //     wrist   fork inner face 0.0180   boss face 0.0275   -> 0.0095 of solid overlap
+        //
+        // That is 16-17% of a limb radius of one casting buried inside another, at every pivot.
+        // Worse, the fork plates were CYLINDERS RUN ALONG THE MEMBER, so each was as wide across
+        // the pivot axis as it was deep -- 0.093 wide when the gap it had to fit was 0.070 -- and
+        // it could not help but swallow the boss. And the actuator pod, offset 0.92..1.32 joint
+        // radii along that same axis, sat entirely INSIDE the plate, on one flank only, which is
+        // where the lopsidedness came from.
+        //
+        // Everything below is measured in ONE unit: the radius of the pivot it belongs to. Both
+        // halves read the same constants, so the fit is arithmetic rather than eyeballed, and the
+        // parts land in a fixed order out from the centre-line:
+        //
+        //     0.00 - 0.50   boss           (drawJoint)  the load-bearing barrel
+        //     0.50 - 0.66   AIR            CLEVIS_GAP   daylight, which is what makes the pivot
+        //                                               read as two parts instead of one lump
+        //     0.66 - 0.92   lug            (drawLimb)   flat eye, faces square to the pivot axis
+        //     0.92 - 1.14   drive housing  (drawJoint)  seats flush on the lug's outer face
+        //     1.14 - 1.19   neon ring      (drawJoint)
+        //     1.19 - 1.25   pin cap        (drawJoint)
+        //
+        // Both flanks get the identical stack, so the axis is symmetric about itself -- that is
+        // the "no unevenness" half. The pin ends at 0.92, flush inside the lug faces rather than
+        // standing proud of them, and the whole assembly is 1.25 joint radii half-width against
+        // the old pod's 1.32, so it is flatter as well as even.
+        const val BOSS_HALF = 0.50f
+        const val BOSS_R = 0.84f
+        const val CLEVIS_GAP = 0.16f
+        const val CLEVIS_IN = BOSS_HALF + CLEVIS_GAP      // 0.66 -- lug inner face
+        const val CLEVIS_OUT = 0.92f                      // lug outer face, and the pin's ends
+        const val LUG_R = 1.10f
+        const val PIN_R = 0.20f
 
         /**
-         * Actuator pod: offset from the pivot, length and radius, all in joint radii.
+         * The drive housing, which replaces the flank-mounted pod.
          *
-         * Change 41 pulled it in hard. At 1.55 out and 1.05 long it was a drum cantilevered off
-         * the side of every axis -- the pod had become the widest thing on the machine and the
-         * arm read as knuckly. A drive housing on a real arm is a shallow disc sitting close in
-         * against the casting; it wants to be legible, not massive.
+         * Coaxial with the pin rather than hung off the side of it. That fixes three things at
+         * once: it cannot foul the fork, because it sits on the lug's own machined face; it can be
+         * mirrored onto both flanks, so the axis stops looking lopsided; and a shallow disc square
+         * to the pivot is flatter than a drum cantilevered off it.
          */
-        const val POD_OFFSET = 0.92f
-        const val POD_LENGTH = 0.40f
-        const val POD_RADIUS = 0.46f
-        const val POD_FINS = 3
+        const val HOUSING_OUT = 1.14f
+        const val HOUSING_R = 0.60f
+        const val NEON_OUT = 1.19f
+        const val CAP_OUT = 1.25f
+        const val CAP_R = 0.34f
+
+        /**
+         * Where a member's casting starts, out from its own pivot, in joint radii.
+         *
+         * It has to clear the PREVIOUS member's lug, which is a disc of radius LUG_R centred on
+         * that pivot -- anything closer in than LUG_R cuts straight through it. The gap between
+         * pivot and casting is spanned by a neck, which at NECK_R is thinner than CLEVIS_IN and
+         * therefore threads between the two lugs without touching either.
+         */
+        const val ROOT_STANDOFF = 1.16f
+        const val NECK_R = 0.60f
+
+        /** Joint radii, named once so a member and its pivot cannot disagree about them. */
+        const val J_SHOULDER = 0.085f
+        const val J_ELBOW = 0.070f
+        const val J_WRIST = 0.055f
 
         /** Fraction of the ram that is barrel rather than exposed rod. */
         const val RAM_BARREL = 0.52f
