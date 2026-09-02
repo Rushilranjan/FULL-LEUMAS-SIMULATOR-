@@ -165,27 +165,65 @@ class SceneRenderer(
         val span = Arena3D.RAIL_HALF * 2f + 0.5f
         val half = span / 2f
 
+        // ---- THE RAIL (change 47) ------------------------------------------------------------
+        //
+        // The axis was finished the way the base was before change 43: specular 0.12 to 0.75 at
+        // shininess 14 to 60, against a robot running 1.0 at 128. Under the Fresnel-weighted
+        // highlight that gap is enormous -- the machine gathers a moving highlight and reads as
+        // machined, the rail under it gathered almost none and read as painted card. It is the
+        // largest object in the frame and it was the flattest, so it dragged the whole image down
+        // however well the robot was built.
+        //
+        // Everything on the axis is now finished on the machine's own scale, in the same graphite
+        // and steel families, with the ground parts -- shafts, screw, thread -- taken up to chrome
+        // because that is what they are: hardened and polished, the shiniest things on any real
+        // linear axis.
+
         // Extrusion body, with two inset side grooves to read as a T-slot profile.
         modelBox(0f, -0.005f, 0f, span, 0.10f, 0.30f)
-        program.setModel(model, 0.62f, 0.65f, 0.69f, specular = 0.22f, shininess = 26f)
+        program.setModel(model, 0.30f, 0.32f, 0.36f, specular = 1f, shininess = 112f, rim = 0.45f)
         box.draw(program)
         listOf(-1f, 1f).forEach { s ->
             modelBox(0f, -0.005f, s * 0.152f, span * 0.995f, 0.036f, 0.02f)
-            program.setModel(model, 0.34f, 0.37f, 0.41f, specular = 0.15f, shininess = 18f)
+            program.setModel(model, JOINT[0], JOINT[1], JOINT[2],
+                             specular = 1f, shininess = 126f, rim = 0.4f)
             box.draw(program)
+        }
+
+        // A capping strip along the top edge of each flank, and a line of hold-down bolts down the
+        // bed. An extrusion this long with no repeating feature has nothing to give the eye a
+        // sense of its length -- the bolts are what make it read as a run of machine bed rather
+        // than as one stretched box.
+        listOf(-1f, 1f).forEach { s ->
+            modelBox(0f, 0.043f, s * 0.140f, span * 0.998f, 0.014f, 0.026f)
+            program.setModel(model, MACHINED[0], MACHINED[1], MACHINED[2],
+                             specular = 1f, shininess = 122f, rim = 0.5f)
+            box.draw(program)
+        }
+        run {
+            val pitch = span / RAIL_BOLTS
+            for (i in 0 until RAIL_BOLTS) {
+                val x = -half + pitch * (i + 0.5f)
+                listOf(-1f, 1f).forEach { s ->
+                    cylinderBetween(x, 0.049f, s * 0.140f, x, 0.059f, s * 0.140f, radius = 0.009f)
+                    program.setModel(model, 0.52f, 0.55f, 0.59f,
+                                     specular = 1f, shininess = 120f, rim = 0.5f)
+                    cyl.draw(program)
+                }
+            }
         }
 
         // Round guide shafts either side of the screw.
         listOf(-1f, 1f).forEach { s ->
             cylinderBetween(-half, 0.075f, s * 0.105f, half, 0.075f, s * 0.105f, radius = 0.026f)
-            program.setModel(model, 0.80f, 0.83f, 0.86f, specular = 0.75f, shininess = 60f)
+            program.setModel(model, 0.68f, 0.71f, 0.76f, specular = 1f, shininess = 142f, rim = 0.45f)
             cyl.draw(program)
         }
 
         // Ball screw: a polished core plus the helical thread riding on it. The thread's spin is a
         // pure function of carriage position, so it can never drift out of step with the motion.
         cylinderBetween(-half, 0.075f, 0f, half, 0.075f, 0f, radius = 0.021f)
-        program.setModel(model, 0.72f, 0.75f, 0.78f, specular = 0.6f, shininess = 48f)
+        program.setModel(model, 0.60f, 0.63f, 0.68f, specular = 1f, shininess = 138f, rim = 0.4f)
         cyl.draw(program)
 
         // One revolution must advance the carriage by exactly one thread pitch, or the thread
@@ -193,18 +231,26 @@ class SceneRenderer(
         val lead = span / SCREW_TURNS
         val spinDeg = carriageX / lead * 360f
         screwModel(0f, 0.075f, 0f, span, radius = 0.036f, spinDeg = spinDeg)
-        program.setModel(model, 0.76f, 0.79f, 0.82f, specular = 0.7f, shininess = 54f)
+        program.setModel(model, 0.64f, 0.67f, 0.72f, specular = 1f, shininess = 136f, rim = 0.4f)
         thread.draw(program)
 
         // Pillow blocks / screw supports at both ends.
         listOf(-1f, 1f).forEach { s ->
             modelBox(s * half, 0.09f, 0f, 0.11f, 0.26f, 0.34f)
-            program.setModel(model, 0.28f, 0.31f, 0.35f, specular = 0.18f, shininess = 20f)
+            program.setModel(model, 0.26f, 0.28f, 0.32f, specular = 1f, shininess = 118f, rim = 0.45f)
             box.draw(program)
+            // Bearing housing, and a machined cap over the screw end.
             cylinderBetween(
                 s * half - 0.035f, 0.075f, 0f, s * half + 0.035f, 0.075f, 0f, radius = 0.055f,
             )
-            program.setModel(model, 0.16f, 0.17f, 0.19f, specular = 0.4f, shininess = 34f)
+            program.setModel(model, JOINT[0], JOINT[1], JOINT[2],
+                             specular = 1f, shininess = 132f, rim = 0.5f)
+            cyl.draw(program)
+            cylinderBetween(
+                s * (half + 0.030f), 0.075f, 0f, s * (half + 0.044f), 0.075f, 0f, radius = 0.038f,
+            )
+            program.setModel(model, MACHINED[0], MACHINED[1], MACHINED[2],
+                             specular = 1f, shininess = 124f, rim = 0.5f)
             cyl.draw(program)
         }
 
@@ -212,13 +258,14 @@ class SceneRenderer(
 
         // Carriage riding the rail.
         modelBox(carriageX, 0.055f, 0f, 0.34f, 0.13f, 0.32f)
-        program.setModel(model, 0.30f, 0.33f, 0.37f, specular = 0.24f, shininess = 24f)
+        program.setModel(model, 0.24f, 0.26f, 0.30f, specular = 1f, shininess = 120f, rim = 0.45f)
         box.draw(program)
         // Ball-nut wrapped around the screw.
         cylinderBetween(
             carriageX - 0.075f, 0.075f, 0f, carriageX + 0.075f, 0.075f, 0f, radius = 0.052f,
         )
-        program.setModel(model, 0.18f, 0.20f, 0.23f, specular = 0.45f, shininess = 40f)
+        program.setModel(model, JOINT[0], JOINT[1], JOINT[2],
+                         specular = 1f, shininess = 134f, rim = 0.5f)
         cyl.draw(program)
         // Linear bearings on the guide shafts.
         listOf(-1f, 1f).forEach { s ->
@@ -226,12 +273,13 @@ class SceneRenderer(
                 carriageX - 0.06f, 0.075f, s * 0.105f, carriageX + 0.06f, 0.075f, s * 0.105f,
                 radius = 0.042f,
             )
-            program.setModel(model, 0.20f, 0.22f, 0.25f, specular = 0.4f, shininess = 34f)
+            program.setModel(model, MACHINED[0], MACHINED[1], MACHINED[2],
+                             specular = 1f, shininess = 128f, rim = 0.5f)
             cyl.draw(program)
         }
         // Mounting plate on top of the carriage.
         modelBox(carriageX, 0.128f, 0f, 0.40f, 0.03f, 0.36f)
-        program.setModel(model, 0.22f, 0.24f, 0.28f, specular = 0.25f, shininess = 22f)
+        program.setModel(model, 0.20f, 0.22f, 0.25f, specular = 1f, shininess = 124f, rim = 0.5f)
         box.draw(program)
     }
 
@@ -245,7 +293,8 @@ class SceneRenderer(
             // Slight sag toward the middle of the run.
             val sag = 0.018f * sin(Math.PI.toFloat() * t)
             modelBox(x, 0.045f - sag, z, 0.05f, 0.035f, 0.055f)
-            program.setModel(model, 0.14f, 0.15f, 0.17f, specular = 0.12f, shininess = 14f)
+            program.setModel(model, JOINT[0], JOINT[1], JOINT[2],
+                             specular = 1f, shininess = 118f, rim = 0.4f)
             box.draw(program)
         }
     }
@@ -466,14 +515,7 @@ class SceneRenderer(
                                  specular = 1f, shininess = 128f, rim = 0.5f)
                 cyl.draw(program)
 
-                val face = add(pivot, scale(ear, J_SHOULDER * CLEVIS_OUT * sgn))
-                cylinderBetween3(
-                    face, add(face, scale(ear, -J_SHOULDER * 0.05f * sgn)),
-                    radius = J_SHOULDER * (LUG_R - 0.10f),
-                )
-                program.setModel(model, MACHINED[0], MACHINED[1], MACHINED[2],
-                                 specular = 1f, shininess = 124f, rim = 0.5f)
-                cyl.draw(program)
+                // No relief here either; see the lug in drawLimb for why.
             }
         }
 
@@ -562,7 +604,7 @@ class SceneRenderer(
         // halves could not previously agree on a fit because neither knew the other's size.
         drawLimb(shoulder, elbow, 0.075f, J_SHOULDER, J_ELBOW, sideAxis(pose.baseYaw))
         drawLimb(elbow, wrist, 0.060f, J_ELBOW, J_WRIST, sideAxis(pose.baseYaw))
-        drawLimb(wrist, gripper, 0.048f, J_WRIST, 0f, sideAxis(pose.baseYaw))
+        drawLimb(wrist, gripper, 0.048f, J_WRIST, 0f, sideAxis(pose.baseYaw), dressed = false)
 
         // THE RAM (change 40). This was a plain chrome rod, and a plain rod is the one part of a
         // linkage that carries no information: you cannot tell which way it drives or where the
@@ -696,6 +738,7 @@ class SceneRenderer(
         rootJoint: Float,
         tipJoint: Float,
         side: FloatArray,
+        dressed: Boolean = true,
     ) {
         val span = sub(b, a)
         val length = len(span)
@@ -727,14 +770,16 @@ class SceneRenderer(
         cyl.draw(program)
 
         // Dark relief groove at the root's shoulder, so the collar reads as a separate casting
-        // bolted on rather than as a bulge in the same tube.
-        cylinderBetween3(
-            sub(rootEnd, scale(dir, 0.008f)), add(rootEnd, scale(dir, 0.008f)),
-            radius = rootR * 0.88f,
-        )
-        program.setModel(model, JOINT[0], JOINT[1], JOINT[2],
-                         specular = 1f, shininess = 132f, rim = 0.45f)
-        cyl.draw(program)
+        // bolted on rather than as a bulge in the same tube. Undressed members skip it.
+        if (dressed) {
+            cylinderBetween3(
+                sub(rootEnd, scale(dir, 0.008f)), add(rootEnd, scale(dir, 0.008f)),
+                radius = rootR * 0.88f,
+            )
+            program.setModel(model, JOINT[0], JOINT[1], JOINT[2],
+                             specular = 1f, shininess = 132f, rim = 0.45f)
+            cyl.draw(program)
+        }
 
         // The shell, tapering root -> waist. Its two end radii are known here rather than left to
         // the mesh, so the bands below can be placed exactly proud of it instead of guessed at.
@@ -746,14 +791,20 @@ class SceneRenderer(
         limb.draw(program)
 
         // Waist band, sitting exactly on the taper wherever along it the band falls.
-        val waist = add(rootEnd, scale(sub(forkStart, rootEnd), 0.62f))
-        cylinderBetween3(
-            sub(waist, scale(dir, 0.014f)), add(waist, scale(dir, 0.014f)),
-            radius = (shellRoot + (shellTip - shellRoot) * 0.62f) * 1.03f,
-        )
-        program.setModel(model, MACHINED[0], MACHINED[1], MACHINED[2],
-                         specular = 1f, shininess = 126f, rim = 0.55f)
-        cyl.draw(program)
+        //
+        // Change 47: the FOREARM does without it. That member runs straight into the tool, and the
+        // span from its collar to the vessel was carrying more edges than anything else on the
+        // machine; it is now collar, shell, and one flange at the end, and nothing between them.
+        if (dressed) {
+            val waist = add(rootEnd, scale(sub(forkStart, rootEnd), 0.62f))
+            cylinderBetween3(
+                sub(waist, scale(dir, 0.014f)), add(waist, scale(dir, 0.014f)),
+                radius = (shellRoot + (shellTip - shellRoot) * 0.62f) * 1.03f,
+            )
+            program.setModel(model, MACHINED[0], MACHINED[1], MACHINED[2],
+                             specular = 1f, shininess = 126f, rim = 0.55f)
+            cyl.draw(program)
+        }
 
         if (tipJoint > 0f) {
             // THE LUGS. Flat eyes whose faces are square to the pivot axis, one each side of the
@@ -770,15 +821,17 @@ class SceneRenderer(
                                  specular = 1f, shininess = 128f, rim = 0.5f)
                 cyl.draw(program)
 
-                // Machined relief on the outer face, just inside where the housing lands.
-                val face = add(b, scale(side, tipJoint * CLEVIS_OUT * sgn))
-                cylinderBetween3(
-                    face, add(face, scale(side, -tipJoint * 0.05f * sgn)),
-                    radius = tipJoint * (LUG_R - 0.10f),
-                )
-                program.setModel(model, MACHINED[0], MACHINED[1], MACHINED[2],
-                                 specular = 1f, shininess = 124f, rim = 0.5f)
-                cyl.draw(program)
+                // Change 47 removed the machined relief that used to sit here, and it was not a
+                // taste call -- it was a BUG. The relief ran from the lug's outer face INWARD, so
+                // its outer cap and the lug's outer cap were at exactly the same depth, over an
+                // annulus 0.007 wide. Two coplanar faces is the textbook z-fighting case: the
+                // depth test picks between them per pixel, and what came out was a ring of radial
+                // dashes around every pivot that crawled as the arm moved. That is the "lines
+                // surrounding the joints", and why they appeared to rotate.
+                //
+                // It could have been fixed by offsetting the relief. It is deleted instead,
+                // because the ask was for fewer lines and the pivot is better without it: lug,
+                // housing, bezel, cap, and nothing else.
             }
         } else {
             // The last member ends at the tool, not at a pivot, so it gets a wrist flange rather
@@ -829,7 +882,6 @@ class SceneRenderer(
         // and -- on BOTH flanks now -- the drive housing seated on the lug's outer face, its neon
         // ring, and the black cap. See the contract above for where each lands.
         val side = sideAxis(yaw)
-        val fwd = forward(yaw)
 
         // Load-bearing boss, spanning the gap between the lugs with air either side of it.
         cylinderBetween3(
@@ -883,17 +935,10 @@ class SceneRenderer(
                              specular = 1f, shininess = 132f, rim = 0.45f)
             cyl.draw(program)
 
-            // Four bolts holding the housing to the lug, on the housing's shoulder.
-            for (i in 0 until 4) {
-                val ang = i * (Math.PI.toFloat() / 2f) + 0.4f
-                val up = normalize(cross(side, fwd))
-                val o = add(scale(fwd, cos(ang) * radius * (HOUSING_R + 0.16f)),
-                            scale(up, sin(ang) * radius * (HOUSING_R + 0.16f)))
-                val c = add(face, o)
-                cylinderBetween3(c, add(c, scale(side, radius * 0.10f * sgn)), radius = radius * 0.06f)
-                program.setModel(model, 0.50f, 0.52f, 0.56f, specular = 0.85f, shininess = 78f)
-                cyl.draw(program)
-            }
+            // No bolt heads on the housing (change 47). They were the only other feature on the
+            // pivot face, and being at fixed angles in the joint's own frame they were also the
+            // only thing there that could read as turning. With them gone every part of the axis
+            // is rotationally symmetric, so there is nothing left to appear to spin at all.
         }
     }
 
@@ -1494,27 +1539,19 @@ class SceneRenderer(
             )
             cyl.draw(program)
 
-            // Cover plate over the middle of it (change 46).
-            //
-            // The lit part above is a CYLINDER, and its flat cap faces the camera -- so what read
-            // as a "lit rim" was a filled cyan disc 0.108 across, the most saturated thing in the
-            // frame and the last reason the head still looked blue. Capping it leaves only the
-            // outer 0.005 showing, which is the ring it was always supposed to be.
-            val cover = add(face, scale(side, 0.001f * sgn))
-            cylinderBetween3(cover, add(cover, scale(side, 0.005f * sgn)), radius = PUMP_RADIUS * 0.87f)
-            program.setModel(model, JOINT[0], JOINT[1], JOINT[2],
-                             specular = 1f, shininess = 140f, rim = 0.5f)
-            cyl.draw(program)
+            // Change 46 capped this lit face to kill the cyan disc; change 47 takes the cap back
+            // off. The cover was hiding the head's bolt circle against a black plate, and those
+            // studs are the one thing that shows the pump is a built assembly rather than a disc.
+            // The face reads blue again, and that is the trade that was asked for.
 
-            // Bolt ring on the cover plate.
+            // Bolt ring on the lit face.
             for (i in 0 until PUMP_BOLTS) {
                 val a = i * (2f * Math.PI.toFloat() / PUMP_BOLTS)
-                val o = add(scale(pumpOut, cos(a) * PUMP_RADIUS * 0.66f),
-                            scale(pumpUp, sin(a) * PUMP_RADIUS * 0.66f))
+                val o = add(scale(pumpOut, cos(a) * PUMP_RADIUS * 0.74f),
+                            scale(pumpUp, sin(a) * PUMP_RADIUS * 0.74f))
                 val c = add(face, o)
-                cylinderBetween3(c, add(c, scale(side, 0.011f * sgn)), radius = 0.0048f)
-                program.setModel(model, MACHINED[0], MACHINED[1], MACHINED[2],
-                                 specular = 1f, shininess = 124f, rim = 0.5f)
+                cylinderBetween3(c, add(c, scale(side, 0.010f * sgn)), radius = 0.006f)
+                program.setModel(model, 0.50f, 0.52f, 0.56f, specular = 0.85f, shininess = 78f)
                 cyl.draw(program)
             }
         }
@@ -1917,6 +1954,9 @@ class SceneRenderer(
 
         const val CHAIN_LINKS = 14
 
+        /** Hold-down bolts down each flank of the rail bed (change 47). */
+        const val RAIL_BOLTS = 16
+
         // Process vessel on the end effector (change 15.1).
         /** Opacity of the glass vessel body: enough to read as glass, clear enough to see the level. */
         const val GLASS_ALPHA = 0.40f
@@ -2212,7 +2252,7 @@ class SceneRenderer(
         const val RAM_BARREL = 0.52f
 
         const val JOINT_BOLTS = 8
-        const val PUMP_BOLTS = 6
+        const val PUMP_BOLTS = 10
 
         // The vessel-to-pump service wire (change 39).
         const val WIRE_SEGMENTS = 9
