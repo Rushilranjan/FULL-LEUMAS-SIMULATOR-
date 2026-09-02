@@ -142,6 +142,16 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
     val panelsClosed: StateFlow<Long> = _panelsClosed.asStateFlow()
 
     /**
+     * Fade the bottom-centre cycle bar while the arm is working over it (change 27).
+     *
+     * Separate from [taskCardDimmed] and [panelsDimmed] because the *test* is different, not just
+     * the target -- see [tick]. Those two sit beside the machine and are occluded by where it stands;
+     * this one sits under it and is occluded by how far down it reaches.
+     */
+    private val _cycleDimmed = MutableStateFlow(false)
+    val cycleDimmed: StateFlow<Boolean> = _cycleDimmed.asStateFlow()
+
+    /**
      * The sequence-start announcement (change 13.6), or null when none is playing.
      *
      * Set the moment `SEQ:<n>` arrives and cleared after [SEQUENCE_INTRO_MS]. It is a pure overlay:
@@ -306,6 +316,23 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
         val dimRight = machine.isBusy &&
             pose.carriageX >= geometry.widthPx * (1f - PANEL_ZONE_FRACTION)
         if (_panelsDimmed.value != dimRight) _panelsDimmed.value = dimRight
+
+        // Change 27: the cycle bar was the one readout that never got out of the way, and reaching
+        // down for a collection put the whole tool through it.
+        //
+        // It needs a different test from the two above, which is why it did not simply fall out of
+        // them. Those guard cards standing BESIDE the machine, so a horizontal band on the carriage
+        // is the right question. The cycle bar runs under the machine and spans over half the
+        // arena, well below the rail line -- horizontally the arm is nearly always over some part of
+        // it, and what actually decides occlusion is whether the tool has come down that far. A
+        // top-edge reach at rail centre passes high above it and must leave it alone.
+        //
+        // So: how low is the gripper, in the reach plane, where y grows downward from the shoulder.
+        // Blenders on the right edge peak around 0.16 and the transit poses are negative, while a
+        // bottom-edge reach lands near 0.75 after [Arena3D.clampToReach] -- a wide gap, and the
+        // threshold sits in it.
+        val dimCycle = machine.isBusy && pose3d.arm.gripper.y >= CYCLE_LOW_REACH
+        if (_cycleDimmed.value != dimCycle) _cycleDimmed.value = dimCycle
 
         // Change 11.1: the blender->packaging / vessel->bottling process transfer is no longer drawn
         // on screen. That handoff is shown entirely by the MCU-controlled LED strip on the physical
@@ -519,5 +546,22 @@ class RobotViewModel(app: Application) : AndroidViewModel(app) {
          * panels fade while the carriage is inside it during a transfer.
          */
         const val PANEL_ZONE_FRACTION = 0.42f
+
+        /**
+         * How far down the gripper has to reach, in reach-plane units, before it is over the
+         * bottom-centre cycle bar (change 27).
+         *
+         * Reach-plane y grows downward from the shoulder. Measured against the poses that exist:
+         *
+         *     STOW                  -0.62      transit, must never dim
+         *     CARRY                 -0.30      transit, must never dim
+         *     blender, RIGHT 0.30   -0.38      mid-height, passes beside the bar
+         *     blender, RIGHT 0.60    0.16      mid-height, passes beside the bar
+         *     any BOTTOM module      0.75      clamped from 0.88; through the bar
+         *
+         * 0.45 sits in the gap with room either side, so neither a transit pose nor a mid-height
+         * reach can trip it and every bottom-edge reach does.
+         */
+        const val CYCLE_LOW_REACH = 0.45f
     }
 }

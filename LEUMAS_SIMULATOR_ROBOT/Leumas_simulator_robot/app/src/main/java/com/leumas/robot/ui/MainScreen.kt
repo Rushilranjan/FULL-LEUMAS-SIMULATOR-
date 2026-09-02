@@ -58,6 +58,7 @@ fun MainScreen(viewModel: RobotViewModel) {
     val sequenceIntro by viewModel.sequenceIntro.collectAsState()
     val startGate by viewModel.startGate.collectAsState()
     val panelsDimmed by viewModel.panelsDimmed.collectAsState()
+    val cycleDimmed by viewModel.cycleDimmed.collectAsState()
     val panelsClosed by viewModel.panelsClosed.collectAsState()
 
     var panelsOpen by rememberSaveable { mutableStateOf(true) }
@@ -75,6 +76,13 @@ fun MainScreen(viewModel: RobotViewModel) {
         targetValue = if (panelsDimmed) LeumasGlass.GHOST_ALPHA else 1f,
         animationSpec = tween(320),
         label = "controlsAlpha",
+    )
+
+    // Change 27: same envelope again, for the bottom-centre cycle bar the arm reaches down through.
+    val cycleAlpha by animateFloatAsState(
+        targetValue = if (cycleDimmed) LeumasGlass.GHOST_ALPHA else 1f,
+        animationSpec = tween(320),
+        label = "cycleAlpha",
     )
 
     // The frame holder. Written by the frame loop, read only inside the Canvas draw lambda, so a
@@ -149,11 +157,12 @@ fun MainScreen(viewModel: RobotViewModel) {
                 .padding(16.dp),
         )
 
-        // Bottom-centre run progress (change 13.7).
+        // Bottom-centre run progress (change 13.7), fading out from under the arm (change 27).
         CycleProgressBar(
             progress = plant.cycleProgress,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
+                .alpha(cycleAlpha)
                 .padding(bottom = 16.dp),
         )
 
