@@ -43,6 +43,35 @@ class CalibrationTest {
         assertEquals(EdgePoint(ArenaEdge.RIGHT, 0.4f), EdgePoint.snapToNearestEdge(0.97f, 0.4f))
     }
 
+    /**
+     * The ENDS of an edge must be reachable, and without a held edge they are not.
+     *
+     * Nearest-edge splits the arena on its diagonals, so each edge's territory narrows to a wedge
+     * that closes to nothing at the corner -- which is exactly where that edge's extreme positions
+     * live. TOP position 0 needs a tap at x = 0 with y < x, that is y < 0. Unreachable.
+     */
+    @Test
+    fun `an edge's extreme positions are reachable by holding that edge`() {
+        // With no held edge the top-left corner belongs to LEFT, so TOP 0 cannot be produced.
+        assertEquals(ArenaEdge.LEFT, EdgePoint.snapToNearestEdge(0.01f, 0.01f).edge)
+
+        // Holding TOP, the same tap stays on TOP and gives the extreme position.
+        val held = EdgePoint.snapToNearestEdge(0.01f, 0.01f, ArenaEdge.TOP)
+        assertEquals(ArenaEdge.TOP, held.edge)
+        assertEquals(0.01f, held.position, 1e-4f)
+
+        // ...and the far end of the same edge, at the other corner.
+        val far = EdgePoint.snapToNearestEdge(0.99f, 0.01f, ArenaEdge.TOP)
+        assertEquals(ArenaEdge.TOP, far.edge)
+        assertEquals(0.99f, far.position, 1e-4f)
+
+        // Stickiness is not glue: a tap clearly on another edge still moves there.
+        assertEquals(
+            ArenaEdge.BOTTOM,
+            EdgePoint.snapToNearestEdge(0.5f, 0.98f, ArenaEdge.TOP).edge,
+        )
+    }
+
     @Test
     fun `snapping clamps taps from outside the arena`() {
         val p = EdgePoint.snapToNearestEdge(-0.4f, 1.9f)

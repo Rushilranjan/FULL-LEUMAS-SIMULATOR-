@@ -546,9 +546,22 @@ class SceneRenderer(
 
         if (payload.stream > 0.01f) {
             if (solid) {
-                // Powder keeps the free-flying granule cone. An auger discharging into a chute is a
-                // different machine, and the cone was never what was reported.
-                drawStream(payload, if (payload.pouring) nozzle else top, axis, side, timeS)
+                // Change 34: powder falls STRAIGHT DOWN onto a tray, rather than flying off on a
+                // slanted arc to nowhere. See [drawPowderFall] and [drawTray].
+                val catchY = nozzle[1] - POWDER_DROP
+                val station = pose.station
+                val landY = if (station != null) {
+                    drawTray(
+                        anchor = worldOf(station.reach.x, station.reach.y,
+                                         station.carriageX, station.yaw),
+                        catchY = catchY,
+                        extend = payload.stream,
+                        yaw = station.yaw,
+                    )
+                } else {
+                    catchY
+                }
+                drawPowderFall(nozzle, landY, payload, timeS)
             } else {
                 // **Both directions run through the nozzle**, because the head is a peristaltic
                 // pump and a peristaltic pump is reversible -- rollers squeezing the other way draw
@@ -824,65 +837,119 @@ class SceneRenderer(
      * The liquid stream is a smooth tapered column with a lateral wobble, plus splash droplets
      * thrown off where it lands.
      */
-    private fun drawStream(
+    /**
+     * Powder falling from the dispenser onto the tray (change 34).
+     *
+     * **It used to fly sideways.** The old cone ran 0.34 outward along the tool axis and dropped
+     * 0.26 as the square of that -- a slanted parabola aimed at the module beyond the screen
+     * edge, from a time when nothing was drawn at the module to aim AT. On the rig it read
+     * as grain being thrown past the coordinate and out of frame, which is what "the molecules
+     * move slanted in a weird way" and "it throws below" are both describing.
+     *
+     * Now it is a vertical drop onto [drawTray]'s tray, over a short fixed distance, with the same
+     * constant-acceleration law the liquid uses -- travel `v0*u + (1-v0)*u^2` -- so the grains
+     * visibly speed up as they fall. They are also bigger and much slower than before: the old
+     * forty small fast grains read as a dust spray, and the material this rig doses is a granular
+     * solid, not smoke.
+     *
+     * The scatter is a narrow disc about the fall axis rather than a widening cone, because the
+     * fall is meant to look plumb. Each grain still tumbles on its own axis at its own rate.
+     */
+    private fun drawPowderFall(
+        from: FloatArray,
+        toY: Float,
         payload: Payload,
-        mouth: FloatArray,
-        axis: FloatArray,
-        side: FloatArray,
         timeS: Float,
     ) {
-        val solid = payload.kind == MaterialKind.SOLID
-        // The far end of the arc is always outward, toward the module beyond the screen edge. Only
-        // the vertical sense and the direction of travel flip.
-        val out = normalize(cross(axis, side))
-        val rise = if (payload.pouring) -STREAM_DROP else STREAM_DROP
+        val height = from[1] - toY
+        if (height <= 1e-4f || payload.stream <= 0.01f) return
 
-        fun at(t: Float): FloatArray = add(
-            add(mouth, scale(out, STREAM_REACH * t)),
-            floatArrayOf(0f, rise * t * t, 0f),
-        )
+        for (i in 0 until POWDER_GRAINS) {
+            // Deterministic per-grain jitter, so the scatter is granular but never flickers.
+            val seed = (i * 0.6180339f) % 1f
+            val seed2 = (i * 0.2794f) % 1f
+            val seed3 = (i * 0.4373f) % 1f
 
-        if (solid) {
-            for (i in 0 until POWDER_GRAINS) {
-                // Deterministic per-grain jitter, so the scatter is granular but never flickers.
-                val seed = (i * 0.6180339f) % 1f
-                val seed2 = (i * 0.2794f) % 1f
-                val phase = (timeS * POWDER_SPEED + seed) % 1f
-                val t = if (payload.pouring) phase else 1f - phase
+            val phase = ((timeS * POWDER_SPEED + seed) % 1f + 1f) % 1f
+            val u = if (payload.pouring) phase else 1f - phase
+            // Accelerating: grains bunch at the top and stretch out as they fall.
+            val travel = (POWDER_EXIT * u + (1f - POWDER_EXIT) * u * u).coerceIn(0f, 1f)
 
-                // Cone: the spread grows with distance from the mouth, so grains fan out toward the
-                // module and funnel back in toward the pail.
-                val spread = CONE_SPREAD * t
-                val angle = seed2 * 2f * Math.PI.toFloat() + timeS * 0.4f
-                val lateral = add(
-                    scale(side, cos(angle) * spread),
-                    scale(axis, sin(angle) * spread * 0.55f),
-                )
-                val p = add(at(t), lateral)
-
-                val grainSize = (GRAIN_MIN + (GRAIN_MAX - GRAIN_MIN) * seed) * payload.stream
-                // Each granule tumbles about its own axis at its own rate.
-                val spinAxis = normalize(floatArrayOf(0.4f + seed, 1f - seed2, 0.3f + seed2))
-                val spinDeg = (timeS * (90f + 220f * seed2) + seed * 360f) % 360f
-                modelAtRotated(p, grainSize, spinAxis, spinDeg)
-
-                // Shade jitter so the stream has depth rather than reading as one flat colour.
-                val shade = 0.86f + 0.20f * seed2
-                program.setModel(
-                    model,
-                    POWDER[0] * shade, POWDER[1] * shade, POWDER[2] * shade,
-                    specular = 0.10f, shininess = 10f,
-                )
-                grain.draw(program)
-            }
-        } else {
-            // Unreachable: drawVessel routes liquid straight to [drawLiquidFall], and this is only
-            // ever called for powder. Kept as a guard rather than a crash if that ever changes.
-            drawLiquidFall(
-                mouth, add(mouth, floatArrayOf(0f, -STREAM_DROP, 0f)),
-                payload.stream, suction = false, timeS = timeS,
+            val angle = seed3 * 2f * Math.PI.toFloat()
+            val spread = CONE_SPREAD * (0.35f + 0.65f * seed2)
+            val p = floatArrayOf(
+                from[0] + cos(angle) * spread,
+                from[1] - height * travel,
+                from[2] + sin(angle) * spread,
             )
+
+            val grainSize = (GRAIN_MIN + (GRAIN_MAX - GRAIN_MIN) * seed) * payload.stream
+            val spinAxis = normalize(floatArrayOf(0.4f + seed, 1f - seed2, 0.3f + seed2))
+            val spinDeg = (timeS * (40f + 90f * seed2) + seed * 360f) % 360f
+            modelAtRotated(p, grainSize, spinAxis, spinDeg)
+
+            // Shade jitter so the stream has depth rather than reading as one flat colour.
+            val shade = 0.86f + 0.20f * seed2
+            program.setModel(
+                model,
+                POWDER[0] * shade, POWDER[1] * shade, POWDER[2] * shade,
+                specular = 0.10f, shininess = 10f,
+            )
+            grain.draw(program)
         }
+    }
+
+    /**
+     * The station's tray: out of the module, down to catch the powder, back in (change 34).
+     *
+     * Anchored on the CALIBRATED COORDINATE, not on the tool -- that is the whole point. It rides
+     * between the coordinate and a catch height just under the dispenser, and its travel is purely
+     * vertical: x and z are the coordinate's throughout, so it emerges from the module, drops, and
+     * returns to exactly the point it came from.
+     *
+     * The extension is driven straight off [Payload.stream], the flow envelope, which is already a
+     * smooth 0 -> 1 -> 0 bell over the dispense. That gives emerge, hold and retract from one
+     * number, perfectly in step with the material, with nothing to keep in sync by hand.
+     *
+     * Returns the tray's surface height so the powder lands ON it rather than through it.
+     */
+    private fun drawTray(
+        anchor: FloatArray,
+        catchY: Float,
+        extend: Float,
+        yaw: Float,
+    ): Float {
+        val t = smoothstep(extend.coerceIn(0f, 1f))
+        val y = anchor[1] + (catchY - anchor[1]) * t
+        // Below this it is still inside the module, so there is nothing to see.
+        if (t < 0.02f) return y
+
+        val centre = floatArrayOf(anchor[0], y, anchor[2])
+        val side = sideAxis(yaw)
+
+        // The pan. A frustum is a shallow bowl the right way up, so this is one draw rather than a
+        // base and four walls -- and a bowl reads as a tray from every angle the turret swings to.
+        frustumBetween(centre, add(centre, scale(UP, TRAY_HEIGHT)), radius = TRAY_RADIUS)
+        program.setModel(model, 0.58f, 0.61f, 0.66f, specular = 0.75f, shininess = 64f, rim = 0.7f)
+        hopper.draw(program)
+
+        // A thin plate under it, so the pan does not read as open-bottomed from below.
+        cylinderBetween3(
+            add(centre, scale(UP, -0.004f)), add(centre, scale(UP, 0.004f)),
+            radius = TRAY_RADIUS * 0.34f,
+        )
+        program.setModel(model, 0.44f, 0.47f, 0.52f, specular = 0.6f, shininess = 50f)
+        cyl.draw(program)
+
+        // The rail it slides on, from the module out to the pan. Without it the tray floats.
+        val root = floatArrayOf(anchor[0], anchor[1], anchor[2])
+        listOf(-1f, 1f).forEach { sgn ->
+            val off = scale(side, TRAY_RADIUS * 0.62f * sgn)
+            cylinderBetween3(add(root, off), add(centre, off), radius = 0.007f)
+            program.setModel(model, 0.34f, 0.36f, 0.40f, specular = 0.7f, shininess = 58f)
+            cyl.draw(program)
+        }
+        return y
     }
 
     /**
@@ -1128,15 +1195,36 @@ class SceneRenderer(
         const val PUMP_TUBE_FROM = 0.50f
         const val PUMP_TUBE_ARC = 1.15f
 
-        const val STREAM_REACH = 0.34f
-        const val STREAM_DROP = 0.26f
         const val POWDER_GRAINS = 40
-        const val POWDER_SPEED = 1.35f
+        /**
+         * Grain release rate. Change 34 slowed this from 1.35 -- with bigger grains the old rate
+         * read as a blur, and the requirement is for the drop to be graceful.
+         */
+        const val POWDER_SPEED = 0.45f
 
         /** Widest lateral spread of the granule cone, at the module end (change 14.3). */
-        const val CONE_SPREAD = 0.055f
-        const val GRAIN_MIN = 0.011f
-        const val GRAIN_MAX = 0.023f
+        /**
+         * Lateral scatter of the falling powder, as a radius about the fall axis.
+         *
+         * Change 34 cut this from 0.055 and changed its meaning: it was the widest point of a cone
+         * that FANNED OUT along a slanted arc, and it is now a narrow, constant disc about a plumb
+         * drop. The fall is supposed to look vertical.
+         */
+        const val CONE_SPREAD = 0.016f
+
+        /** Grain size. Change 34 roughly doubled these: the old ones read as dust, not granules. */
+        const val GRAIN_MIN = 0.020f
+        const val GRAIN_MAX = 0.034f
+
+        /** How far the powder falls from the dispenser to the tray. */
+        const val POWDER_DROP = 0.10f
+
+        /** Speed the powder leaves the dispenser at, relative to its landing speed. */
+        const val POWDER_EXIT = 0.40f
+
+        // The station tray (change 34).
+        const val TRAY_RADIUS = 0.070f
+        const val TRAY_HEIGHT = 0.026f
 
         const val LIQUID_SEGMENTS = 14
         const val LIQUID_RADIUS = 0.026f

@@ -59,14 +59,20 @@ fun ArenaCanvas(
     modifier: Modifier = Modifier,
     onCalibrationTap: ((EdgePoint) -> Unit)? = null,
 ) {
+    // The edge the module being calibrated currently sits on, so a tap near a corner sticks to it
+    // rather than flipping onto the neighbouring edge. See EdgePoint.snapToNearestEdge; it is also
+    // the key for the gesture detectors below, which would otherwise capture it once and go stale.
+    val calibrationEdge = calibrationOverlay?.let {
+        it.calibration.pointFor(it.selectedSlot).edge
+    }
     Canvas(
         modifier = modifier.then(
             if (onCalibrationTap != null) {
-                Modifier.pointerInput(Unit) {
+                Modifier.pointerInput(calibrationEdge) {
                     detectTapGestures { offset ->
                         val nx = offset.x / size.width.toFloat()
                         val ny = offset.y / size.height.toFloat()
-                        onCalibrationTap(EdgePoint.snapToNearestEdge(nx, ny))
+                        onCalibrationTap(EdgePoint.snapToNearestEdge(nx, ny, calibrationEdge))
                     }
                 }
             } else {
@@ -120,14 +126,20 @@ fun ArenaOverlay(
     modifier: Modifier = Modifier,
     onCalibrationTap: ((EdgePoint) -> Unit)? = null,
 ) {
+    // The edge the module being calibrated currently sits on, so a tap near a corner sticks to it
+    // rather than flipping onto the neighbouring edge. See EdgePoint.snapToNearestEdge; it is also
+    // the key for the gesture detectors below, which would otherwise capture it once and go stale.
+    val calibrationEdge = calibrationOverlay?.let {
+        it.calibration.pointFor(it.selectedSlot).edge
+    }
     Canvas(
         modifier = modifier.then(
             if (onCalibrationTap != null) {
-                Modifier.pointerInput(Unit) {
+                Modifier.pointerInput(calibrationEdge) {
                     detectTapGestures { offset ->
                         val nx = offset.x / size.width.toFloat()
                         val ny = offset.y / size.height.toFloat()
-                        onCalibrationTap(EdgePoint.snapToNearestEdge(nx, ny))
+                        onCalibrationTap(EdgePoint.snapToNearestEdge(nx, ny, calibrationEdge))
                     }
                 }
             } else {

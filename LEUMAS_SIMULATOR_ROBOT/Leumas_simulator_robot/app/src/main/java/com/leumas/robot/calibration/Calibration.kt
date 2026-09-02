@@ -35,12 +35,37 @@ data class EdgePoint(
 
     companion object {
         /**
+         * How much closer another edge must be before a tap leaves the edge already chosen.
+         *
+         * See [snapToNearestEdge]. In normalised arena units, so 0.12 is 12% of the width.
+         */
+        private const val EDGE_STICK = 0.12f
+
+        /**
          * Snap an arbitrary normalised tap to the closest boundary.
          *
          * Calibration is a tap "near or on" an edge (spec, calibration section), so the user never
          * has to hit a 1-pixel line.
+         *
+         * **Change 34: [keep] makes the CORNERS reachable, and without it they are not.**
+         *
+         * Picking the nearest edge splits the arena along its diagonals, so near a corner each
+         * edge's territory narrows to a wedge that closes to nothing at the corner itself. The
+         * extreme positions of an edge sit exactly there. To place a module at TOP position 0 you
+         * have to tap at x = 0 with y < x -- that is, y < 0, which does not exist. The end of every
+         * edge was literally unreachable, and dragging toward one flipped the module onto the
+         * neighbouring edge instead. That is "I can't fix extreme corner coordinates properly".
+         *
+         * Passing the module's current edge as [keep] holds it there until the tap is [EDGE_STICK]
+         * closer to a different one, so you land on the edge you want first and then drag into the
+         * corner without it jumping. Corner points are also where the two readings agree anyway:
+         * TOP at 0 and LEFT at 0 both normalise to (0, 0), the same world position -- the stickiness
+         * decides which edge you are travelling ALONG, which is what the operator is actually
+         * choosing.
+         *
+         * With [keep] null this is exactly the old nearest-edge behaviour.
          */
-        fun snapToNearestEdge(nx: Float, ny: Float): EdgePoint {
+        fun snapToNearestEdge(nx: Float, ny: Float, keep: ArenaEdge? = null): EdgePoint {
             val x = nx.coerceIn(0f, 1f)
             val y = ny.coerceIn(0f, 1f)
             val distances = listOf(
@@ -49,7 +74,14 @@ data class EdgePoint(
                 ArenaEdge.TOP to y,
                 ArenaEdge.BOTTOM to (1f - y),
             )
-            val (edge, _) = distances.minByOrNull { it.second }!!
+            val (nearest, best) = distances.minByOrNull { it.second }!!
+            val edge = if (keep != null &&
+                distances.first { it.first == keep }.second <= best + EDGE_STICK
+            ) {
+                keep
+            } else {
+                nearest
+            }
             val position = when (edge) {
                 ArenaEdge.LEFT, ArenaEdge.RIGHT -> y
                 ArenaEdge.TOP, ArenaEdge.BOTTOM -> x
