@@ -571,8 +571,15 @@ class Robot3DPoser {
         const val FLOW_START = 0.56f
         const val FLOW_END = 0.98f
 
-        /** Degrees of dispenser rotor rotation per second at full flow (change 15.1). */
-        const val PUMP_DEG_PER_SEC = 260f
+        /**
+         * Degrees of rotor rotation per second at full flow.
+         *
+         * Change 36 raised this from 260 -- three quarters of a turn a second, which on a
+         * three-roller head means each roller has barely moved between one glance and the next.
+         * At 900 it is two and a half turns a second: unmistakably running, which is the point,
+         * since this rotor is the only moving part that says material is being dispensed.
+         */
+        const val PUMP_DEG_PER_SEC = 900f
 
         /** Height the arm arc is lifted above its endpoints, in reach-plane units. */
         const val ARC_LIFT = 0.20f

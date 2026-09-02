@@ -545,27 +545,55 @@ class SceneRenderer(
         // -- material transfer -----------------------------------------------------------------------
 
         if (payload.stream > 0.01f) {
+            // **Which way material travels is decided by which END of the transfer this is.**
+            //
+            // Dispensing, the arm has driven the dispenser up against the module's wall and the
+            // pump pushes material STRAIGHT INTO it -- horizontally, along the direction the
+            // turret is facing, which is by construction the direction of the calibrated point.
+            // It is pumped, not dropped, so it travels at a constant rate and does not arc.
+            //
+            // Collecting, the macro is above the arm and gravity does the work, so material comes
+            // DOWN INTO the vessel. Drawing that out of the nozzle underneath -- as it was before
+            // change 36 -- is the wrong end of the machine entirely: material leaving the discharge
+            // while the vessel fills reads as the tool emptying itself onto the floor.
+            val intoWall = forward(pose.baseYaw)
             if (solid) {
-                // Powder falls STRAIGHT DOWN from the dispenser and stops there, rather than
-                // flying off on a slanted arc to nowhere. See [drawPowderFall].
-                drawPowderFall(nozzle, nozzle[1] - POWDER_DROP, payload, timeS)
+                if (payload.pouring) {
+                    drawPowderStream(
+                        from = nozzle,
+                        to = add(nozzle, scale(intoWall, DISPENSE_REACH)),
+                        gravity = false,
+                        payload = payload,
+                        timeS = timeS,
+                    )
+                } else {
+                    drawPowderStream(
+                        from = add(top, scale(axis, POWDER_RISE)),
+                        to = top,
+                        gravity = true,
+                        payload = payload,
+                        timeS = timeS,
+                    )
+                }
+            } else if (payload.pouring) {
+                drawLiquidFall(
+                    from = nozzle,
+                    to = add(nozzle, scale(intoWall, DISPENSE_REACH)),
+                    flow = payload.stream,
+                    suction = false,
+                    pumped = true,
+                    timeS = timeS,
+                )
             } else {
-                // **Both directions run through the nozzle**, because the head is a peristaltic
-                // pump and a peristaltic pump is reversible -- rollers squeezing the other way draw
-                // in exactly as well as they push out. That is not a convenience: change 16.6 made
-                // the mount a single continuous body, wrist race to vessel flange, so the vessel has
-                // no open top left to pour into. An earlier pass at this drew the intake falling
-                // into `top` and it landed *on the wrist housing*, which is what a closed vessel
-                // should do to anything poured at it.
-                //
-                // So the geometry is identical either way and only the flow reverses; the visible
-                // difference between collecting and dispensing is the level in the glass, which is
-                // the honest cue anyway.
+                // Liquid intake is unchanged: the head is a reversible peristaltic pump and the
+                // vessel has no open top to pour into (change 16.6), so it draws in through the
+                // nozzle exactly as it pushes out.
                 drawLiquidFall(
                     from = nozzle,
                     to = add(nozzle, scale(down, POUR_FALL)),
                     flow = payload.stream,
-                    suction = !payload.pouring,
+                    suction = true,
+                    pumped = false,
                     timeS = timeS,
                 )
             }
@@ -625,6 +653,7 @@ class SceneRenderer(
         to: FloatArray,
         flow: Float,
         suction: Boolean,
+        pumped: Boolean,
         timeS: Float,
     ) {
         val span = sub(to, from)
@@ -644,8 +673,14 @@ class SceneRenderer(
         // converge into the column rather than shedding from it.
         val sense = if (suction) -1f else 1f
 
-        fun speedAt(u: Float) = EXIT_SPEED + 2f * (1f - EXIT_SPEED) * u.coerceIn(0f, 1f)
-        fun travelAt(u: Float) = (EXIT_SPEED * u + (1f - EXIT_SPEED) * u * u).coerceIn(0f, 1f)
+        // A PUMPED jet is pushed at a constant rate: it neither accelerates nor necks down,
+        // because nothing is speeding it up. Gravity does both, which is why a falling stream
+        // and a pumped one cannot share one law.
+        fun speedAt(u: Float) =
+            if (pumped) 1f else EXIT_SPEED + 2f * (1f - EXIT_SPEED) * u.coerceIn(0f, 1f)
+        fun travelAt(u: Float) =
+            if (pumped) u.coerceIn(0f, 1f)
+            else (EXIT_SPEED * u + (1f - EXIT_SPEED) * u * u).coerceIn(0f, 1f)
         fun pointAt(u: Float) = add(from, scale(dir, height * travelAt(u)))
         // Amplitude grows along the fall, so the breakup happens where the waves have actually
         // grown into it. Linear rather than quadratic: u^2 is closer to the real instability but it
@@ -653,7 +688,10 @@ class SceneRenderer(
         // that quarter is most of what is on screen.
         fun rippleAt(u: Float) =
             1f + WAVE_AMP * u * sin(WAVE_FREQ * travelAt(u) - sense * timeS * WAVE_SPEED)
-        fun radiusAt(u: Float) = base * sqrt(EXIT_SPEED / speedAt(u)) * rippleAt(u)
+        // A pumped jet holds its bore: nothing speeds it up, so there is nothing to neck it
+        // down. It still ripples -- surface waves do not need gravity.
+        fun radiusAt(u: Float) =
+            (if (pumped) base else base * sqrt(EXIT_SPEED / speedAt(u))) * rippleAt(u)
 
         // The coherent column, from the outlet to the breakup point. Many fine segments so the
         // radius step between neighbours is sub-pixel, each running slightly into the next so no
@@ -833,7 +871,7 @@ class SceneRenderer(
      * as grain being thrown past the coordinate and out of frame, which is what "the molecules
      * move slanted in a weird way" and "it throws below" are both describing.
      *
-     * Now it is a vertical drop onto [drawTray]'s tray, over a short fixed distance, with the same
+     * Now it runs in a straight line from one end of the transfer to the other, with the same
      * constant-acceleration law the liquid uses -- travel `v0*u + (1-v0)*u^2` -- so the grains
      * visibly speed up as they fall. They are also bigger and much slower than before: the old
      * forty small fast grains read as a dust spray, and the material this rig doses is a granular
@@ -842,14 +880,22 @@ class SceneRenderer(
      * The scatter is a narrow disc about the fall axis rather than a widening cone, because the
      * fall is meant to look plumb. Each grain still tumbles on its own axis at its own rate.
      */
-    private fun drawPowderFall(
+    private fun drawPowderStream(
         from: FloatArray,
-        toY: Float,
+        to: FloatArray,
+        gravity: Boolean,
         payload: Payload,
         timeS: Float,
     ) {
-        val height = from[1] - toY
-        if (height <= 1e-4f || payload.stream <= 0.01f) return
+        val span = sub(to, from)
+        val length = len(span)
+        if (length <= 1e-4f || payload.stream <= 0.01f) return
+        val dir = scale(span, 1f / length)
+        // A basis across the stream, so the scatter is a disc about its own axis whichever way it
+        // points. The seed axis is swapped when the stream is near-vertical, or the cross collapses.
+        val seedAxis = if (kotlin.math.abs(dir[1]) > 0.9f) floatArrayOf(1f, 0f, 0f) else UP
+        val across = normalize(cross(dir, seedAxis))
+        val through = normalize(cross(dir, across))
 
         for (i in 0 until POWDER_GRAINS) {
             // Deterministic per-grain jitter, so the scatter is granular but never flickers.
@@ -857,17 +903,18 @@ class SceneRenderer(
             val seed2 = (i * 0.2794f) % 1f
             val seed3 = (i * 0.4373f) % 1f
 
-            val phase = ((timeS * POWDER_SPEED + seed) % 1f + 1f) % 1f
-            val u = if (payload.pouring) phase else 1f - phase
-            // Accelerating: grains bunch at the top and stretch out as they fall.
-            val travel = (POWDER_EXIT * u + (1f - POWDER_EXIT) * u * u).coerceIn(0f, 1f)
+            val u = ((timeS * POWDER_SPEED + seed) % 1f + 1f) % 1f
+            // Falling grains accelerate, so they bunch at the start and stretch out. PUMPED grains
+            // are pushed at a constant rate and stay evenly spaced, which is what makes a pumped
+            // stream read as driven rather than dropped.
+            val travel =
+                if (gravity) (POWDER_EXIT * u + (1f - POWDER_EXIT) * u * u).coerceIn(0f, 1f) else u
 
             val angle = seed3 * 2f * Math.PI.toFloat()
             val spread = CONE_SPREAD * (0.35f + 0.65f * seed2)
-            val p = floatArrayOf(
-                from[0] + cos(angle) * spread,
-                from[1] - height * travel,
-                from[2] + sin(angle) * spread,
+            val p = add(
+                add(from, scale(dir, length * travel)),
+                add(scale(across, cos(angle) * spread), scale(through, sin(angle) * spread)),
             )
 
             val grainSize = (GRAIN_MIN + (GRAIN_MAX - GRAIN_MIN) * seed) * payload.stream
@@ -1150,8 +1197,22 @@ class SceneRenderer(
         const val GRAIN_MIN = 0.020f
         const val GRAIN_MAX = 0.034f
 
-        /** How far the powder falls from the dispenser to the tray. */
-        const val POWDER_DROP = 0.10f
+        /**
+         * How far material is pumped out of the dispenser into the module's wall (change 36).
+         *
+         * The arm brings the dispenser up against the calibrated point and the stream runs
+         * from there outward, past the arena edge and off frame, where the real module is.
+         */
+        const val DISPENSE_REACH = 0.34f
+
+        /**
+         * How far above the vessel mouth an incoming charge is drawn from (change 36).
+         *
+         * Long enough to read as falling from the module overhead rather than appearing at
+         * the rim, short enough not to start above the wrist and look like it comes from the
+         * arm's own elbow.
+         */
+        const val POWDER_RISE = 0.26f
 
         /** Speed the powder leaves the dispenser at, relative to its landing speed. */
         const val POWDER_EXIT = 0.40f
