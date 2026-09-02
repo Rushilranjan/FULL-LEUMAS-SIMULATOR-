@@ -36,6 +36,7 @@ class SceneRenderer(
     private lateinit var pail: Mesh
     private lateinit var heap: Mesh
     private lateinit var hopper: Mesh
+    private lateinit var limb: Mesh
 
     private var aspect: Float = 1.7f
     private val startNanos = System.nanoTime()
@@ -61,14 +62,22 @@ class SceneRenderer(
         // scene is tiny, so depth testing alone keeps it correct without risking dropped faces.
         program = GlProgram()
         box = Mesh.box()
-        cyl = Mesh.cylinder(28)
+        // Change 38: every curved surface is built at more than twice the resolution it was.
+        // At 28 segments a cylinder's silhouette is a visible polygon at this camera distance, and
+        // no amount of shading hides a faceted edge. These meshes are a few hundred triangles each
+        // and there are around fifty draws in a frame, so the cost is nothing on this hardware and
+        // the whole machine stops looking chamfered.
+        cyl = Mesh.cylinder(64)
         thread = Mesh.screwThread(turns = SCREW_TURNS)
         grain = Mesh.granule()
         // A real pail tapers in toward the base; the heap is a shallow mound of powder.
-        pail = Mesh.frustum(topRadius = 0.50f, bottomRadius = 0.38f, segments = 26)
-        heap = Mesh.frustum(topRadius = 0.18f, bottomRadius = 0.50f, segments = 20)
+        pail = Mesh.frustum(topRadius = 0.50f, bottomRadius = 0.38f, segments = 56)
+        // A gently tapered tube for the arm members: real arms are not parallel-sided, and the
+        // taper is most of what makes a limb read as cast rather than as pipe.
+        limb = Mesh.frustum(topRadius = 0.50f, bottomRadius = 0.42f, segments = 64)
+        heap = Mesh.frustum(topRadius = 0.18f, bottomRadius = 0.50f, segments = 44)
         // Hopper cone: wide at the top, tapering to the dispenser inlet (change 15.1).
-        hopper = Mesh.frustum(topRadius = 0.50f, bottomRadius = 0.15f, segments = 24)
+        hopper = Mesh.frustum(topRadius = 0.50f, bottomRadius = 0.15f, segments = 56)
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -251,9 +260,18 @@ class SceneRenderer(
 
         // Everything above the ring yaws with A1.
         // Turret casting (red).
+        // Change 38: white, like the rest of it. The red casting was the last thing on the
+        // machine fighting the shell for attention, and in the references this casting is the
+        // largest clean surface on the whole arm.
         modelBox(cx, Arena3D.SHOULDER_Y - 0.06f, 0f, 0.24f, 0.22f, 0.22f, yawDeg = yawDeg)
-        program.setModel(model, 0.77f, 0.12f, 0.14f, specular = 0.35f, shininess = 28f)
+        program.setModel(model, 0.950f, 0.960f, 0.975f, specular = 1f, shininess = 120f, rim = 0.45f)
         box.draw(program)
+
+        // A neon band round the turret's base, where it meets the slewing ring.
+        cylinderBetween(cx, Arena3D.SHOULDER_Y - 0.165f, 0f, cx, Arena3D.SHOULDER_Y - 0.150f, 0f,
+                        radius = 0.135f)
+        program.setModel(model, NEON[0], NEON[1], NEON[2], specular = 1f, shininess = 128f, rim = 1f)
+        cyl.draw(program)
 
         // Counterweight drum, cantilevered behind the turret (in the yawed -forward direction).
         //
@@ -354,59 +372,42 @@ class SceneRenderer(
         if (length < 1e-4f) return
         val dir = scale(span, 1f / length)
 
-        // 1. structural core
-        cylinderBetween3(a, b, radius = radius * 0.84f)
-        program.setModel(model, 0.12f, 0.13f, 0.15f, specular = 0.55f, shininess = 46f)
-        cyl.draw(program)
+        // Change 38 stripped this back. The previous pass answered "more texture" with more
+        // MARKINGS -- three seam rings, a livery band and a rib on every member -- and the result
+        // was busy, not premium. The references are the opposite: large clean white volumes, a
+        // narrow dark neck where each one enters its joint, and light at the seam. What reads as
+        // expensive is the quality of ONE surface and the restraint around it, not the count of
+        // features on it.
 
-        // 2. shell
-        val s0 = add(a, scale(dir, length * LIMB_SHELL_INSET))
-        val s1 = add(a, scale(dir, length * (1f - LIMB_SHELL_INSET)))
-        cylinderBetween3(s0, s1, radius = radius)
-        program.setModel(model, 0.90f, 0.91f, 0.94f, specular = 0.92f, shininess = 88f, rim = 0.5f)
-        cyl.draw(program)
-
-        // 3. panel seams
-        listOf(0.30f, 0.50f, 0.70f).forEach { t ->
-            val c = add(a, scale(dir, length * t))
-            cylinderBetween3(
-                sub(c, scale(dir, 0.005f)), add(c, scale(dir, 0.005f)),
-                radius = radius * 1.03f,
-            )
-            program.setModel(model, 0.17f, 0.18f, 0.21f, specular = 0.45f, shininess = 34f)
+        // Necks. Narrow and dark, so each member visibly plugs INTO its pivot.
+        val n0 = add(a, scale(dir, length * LIMB_NECK))
+        val n1 = add(a, scale(dir, length * (1f - LIMB_NECK)))
+        listOf(a to n0, n1 to b).forEach { (p, q) ->
+            cylinderBetween3(p, q, radius = radius * 0.60f)
+            program.setModel(model, 0.19f, 0.20f, 0.23f, specular = 0.60f, shininess = 54f)
             cyl.draw(program)
         }
 
-        // 4. lit rings, just inboard of each shell end
-        listOf(LIMB_SHELL_INSET + 0.035f, 1f - LIMB_SHELL_INSET - 0.035f).forEach { t ->
-            val c = add(a, scale(dir, length * t))
+        // The shell: one clean tapered volume, wider at the inboard end, polished hard. This is
+        // the surface the whole machine is judged on, so it gets the highest specular and
+        // shininess anything here uses, plus enough rim to keep its edge bright against the
+        // backdrop.
+        frustumBetween(n1, n0, radius = radius)
+        program.setModel(model, 0.955f, 0.965f, 0.980f, specular = 1f, shininess = 128f, rim = 0.55f)
+        limb.draw(program)
+
+        // Neon at each shell seam. One ring per end, and no other marking anywhere on the member.
+        listOf(n0, n1).forEach { c ->
             cylinderBetween3(
-                sub(c, scale(dir, 0.008f)), add(c, scale(dir, 0.008f)),
-                radius = radius * 1.05f,
+                sub(c, scale(dir, 0.011f)), add(c, scale(dir, 0.011f)),
+                radius = radius * 0.80f,
             )
             program.setModel(
-                model, ACCENT[0], ACCENT[1], ACCENT[2],
-                specular = 1f, shininess = 110f, rim = 1f,
+                model, NEON[0], NEON[1], NEON[2],
+                specular = 1f, shininess = 128f, rim = 1f,
             )
             cyl.draw(program)
         }
-
-        // 5. identity band
-        val c = add(a, scale(dir, length * 0.50f))
-        cylinderBetween3(
-            sub(c, scale(dir, 0.022f)), add(c, scale(dir, 0.022f)),
-            radius = radius * 1.04f,
-        )
-        program.setModel(model, 0.78f, 0.13f, 0.15f, specular = 0.6f, shininess = 52f, rim = 0.3f)
-        cyl.draw(program)
-
-        // A raised rib down one flank, so the member is not a surface of revolution from every
-        // angle. Cheap, and it is what stops a cylinder reading as a cylinder.
-        val ribA = add(add(s0, scale(side, radius * 0.86f)), scale(dir, length * 0.04f))
-        val ribB = add(add(s1, scale(side, radius * 0.86f)), scale(dir, -length * 0.04f))
-        cylinderBetween3(ribA, ribB, radius = radius * 0.17f)
-        program.setModel(model, 0.62f, 0.64f, 0.68f, specular = 0.8f, shininess = 70f, rim = 0.5f)
-        cyl.draw(program)
     }
 
     /**
@@ -440,49 +441,40 @@ class SceneRenderer(
     }
 
     private fun drawJoint(p: FloatArray, yaw: Float, radius: Float) {
-        // A short cylinder whose axis is the pivot line: perpendicular to the reach plane, i.e. the
-        // world "side" direction for this yaw. Change 37 layered it: housing, a proud bearing race,
-        // a lit ring in the gap, and a bolt circle. A pivot is the most looked-at part of an arm.
+        // A pivot, the way the references show one: a dark hub set between the white shells, a
+        // bright ring of light around it, and a polished cap in the middle. Change 38 removed the
+        // bolt circle and the proud bearing race -- at this size they were noise on the one part of
+        // the arm that should be simple and luminous.
         val side = sideAxis(yaw)
-        val h = scale(side, radius)
+        val half = radius * 0.86f
 
-        cylinderBetween3(sub(p, h), add(p, h), radius = radius)
-        program.setModel(model, 0.13f, 0.13f, 0.15f, specular = 0.45f, shininess = 36f)
+        cylinderBetween3(sub(p, scale(side, half)), add(p, scale(side, half)), radius = radius * 0.90f)
+        program.setModel(model, 0.16f, 0.17f, 0.20f, specular = 0.55f, shininess = 48f)
         cyl.draw(program)
 
-        // Bearing race, proud of the housing on both faces.
         listOf(-1f, 1f).forEach { sgn ->
-            val face = add(p, scale(side, radius * sgn))
-            cylinderBetween3(
-                face, add(face, scale(side, radius * 0.16f * sgn)),
-                radius = radius * 0.74f,
-            )
-            program.setModel(model, 0.74f, 0.76f, 0.80f, specular = 0.9f, shininess = 86f, rim = 0.6f)
-            cyl.draw(program)
+            val face = add(p, scale(side, half * sgn))
 
-            // Lit ring recessed behind the race.
+            // The light. Proud of the hub and wider than it, so it reads as a ring rather than a
+            // disc, and at full rim so the silhouette itself glows.
             cylinderBetween3(
-                add(face, scale(side, -radius * 0.05f * sgn)),
-                add(face, scale(side, radius * 0.03f * sgn)),
-                radius = radius * 0.90f,
+                face, add(face, scale(side, radius * 0.14f * sgn)), radius = radius,
             )
             program.setModel(
-                model, ACCENT[0], ACCENT[1], ACCENT[2],
-                specular = 1f, shininess = 110f, rim = 1f,
+                model, NEON[0], NEON[1], NEON[2],
+                specular = 1f, shininess = 128f, rim = 1f,
             )
             cyl.draw(program)
 
-            // Bolt circle.
-            val u = normalize(cross(side, UP))
-            val v = normalize(cross(side, u))
-            for (i in 0 until JOINT_BOLTS) {
-                val a = i * (2f * Math.PI.toFloat() / JOINT_BOLTS)
-                val o = add(scale(u, cos(a) * radius * 0.52f), scale(v, sin(a) * radius * 0.52f))
-                val c = add(face, o)
-                cylinderBetween3(c, add(c, scale(side, radius * 0.10f * sgn)), radius = radius * 0.09f)
-                program.setModel(model, 0.44f, 0.46f, 0.50f, specular = 0.8f, shininess = 72f)
-                cyl.draw(program)
-            }
+            // Polished cap covering the middle, leaving the light showing as a ring around it.
+            val cap = add(face, scale(side, radius * 0.06f * sgn))
+            cylinderBetween3(
+                cap, add(cap, scale(side, radius * 0.13f * sgn)), radius = radius * 0.66f,
+            )
+            program.setModel(
+                model, 0.955f, 0.965f, 0.980f, specular = 1f, shininess = 128f, rim = 0.5f,
+            )
+            cyl.draw(program)
         }
     }
 
@@ -1519,17 +1511,25 @@ class SceneRenderer(
 
 
         // Arm dressing (change 37).
-        /** Accent light colour. No emissive channel exists, so these are drawn at full rim. */
-        val ACCENT = floatArrayOf(0.30f, 0.85f, 1.00f)
+        /**
+         * Neon. No emissive channel exists, so every light on this machine is a near-white-hot
+         * colour drawn at full rim -- the fresnel term lifts the silhouette, which is what reads as
+         * a glow. Kept just off pure cyan so it kicks against the cool white shell rather than
+         * blending into it.
+         */
+        val NEON = floatArrayOf(0.35f, 0.94f, 1.00f)
 
-        /** How far in from each end the shell stops, leaving the structural core showing. */
-        const val LIMB_SHELL_INSET = 0.10f
+        /** Legacy alias: the pump and vessel lights use the same neon. */
+        val ACCENT = NEON
+
+        /** How much of a member's length is dark neck at each end, entering its joint. */
+        const val LIMB_NECK = 0.13f
 
         const val JOINT_BOLTS = 8
         const val PUMP_BOLTS = 10
         const val FLANGE_BOLTS = 8
         const val CABLE_SEGMENTS = 10
-        const val CABLE_RADIUS = 0.014f
+        const val CABLE_RADIUS = 0.009f
         const val CABLE_SAG = 0.10f
 
         /** Band over which the hand's side axis blends to the turret fallback (change 13.3). */

@@ -66,6 +66,9 @@ object LeumasColors {
     val GlowBlue = Color(0xFF2E6BFF)
     val GlowAzure = Color(0xFF4FA8FF)
     val GlowCyan = Color(0xFF25D9E8)
+
+    /** Luminous neon for the recipe name on the intro card (change 38). */
+    val NeonAqua = Color(0xFF19F0FF)
     val GlowIndigo = Color(0xFF6C63FF)
 }
 
