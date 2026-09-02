@@ -517,11 +517,30 @@ class SceneRenderer(
 
         // -- dispenser -------------------------------------------------------------------------------
 
-        val nozzle = if (solid) {
-            drawAuger(hopperTip, out, side, axis, payload)
-        } else {
-            drawPeristalticHead(hopperTip, out, side, axis, payload)
-        }
+        // **One dispenser, for every sequence** (change 30).
+        //
+        // This used to pick the mechanism from the material: a screw auger for
+        // powder, a peristaltic head for liquid, on the honest argument that a
+        // peristaltic head cannot move dry solids. Reported from the rig as "the
+        // robot keeps switching between 2 different pumps at the bottom", and it
+        // was worse than choosing per sequence -- it switched WITHIN one.
+        //
+        // [Payload.EMPTY] defaults its kind to SOLID, and the poser publishes
+        // EMPTY whenever no transfer is in flight. A carry is 42 s against a 40 s
+        // arm animation, so every single carry has an idle gap where the tool
+        // reverted to the auger and then flipped back. On the liquid line that is
+        // a pump turning into an auger and back, twice a cycle, for a material
+        // that never changes.
+        //
+        // Fixing the default would have stopped the flicker, but the operator
+        // asked for one pump across all four sequences, which is also the simpler
+        // machine: real dosing skids are built around one head. The auger is gone
+        // rather than left unreachable -- git has it if the solid line ever wants
+        // its own mechanism back.
+        //
+        // The MATERIAL still differs: powder draws as a granule cone, liquid as a
+        // falling stream. That is what is being moved, not what moves it.
+        val nozzle = drawPeristalticHead(hopperTip, out, side, axis, payload)
 
         // -- material transfer -----------------------------------------------------------------------
 
@@ -688,51 +707,6 @@ class SceneRenderer(
             )
             cyl.draw(program)
         }
-    }
-
-    /**
-     * Screw auger under the hopper, for powder (change 15.1).
-     *
-     * A barrel running out from the hopper outlet with visible flighting turning inside it, a drive
-     * motor on the inboard end, and a discharge spout at the tip. The flighting reuses
-     * [Mesh.screwThread], which already exists for the rail lead screw — it is exactly the right
-     * geometry, and an auger is what actually meters dry solids on a real dosing skid.
-     *
-     * Returns the spout tip, where the material leaves.
-     */
-    private fun drawAuger(
-        inlet: FloatArray,
-        out: FloatArray,
-        side: FloatArray,
-        axis: FloatArray,
-        payload: Payload,
-    ): FloatArray {
-        val barrelStart = add(inlet, scale(out, -AUGER_BACK))
-        val barrelEnd = add(inlet, scale(out, AUGER_LENGTH))
-
-        // Barrel.
-        cylinderBetween3(barrelStart, barrelEnd, radius = AUGER_RADIUS)
-        program.setModel(model, 0.40f, 0.43f, 0.47f, specular = 0.7f, shininess = 58f, rim = 0.5f)
-        cyl.draw(program)
-
-        // Flighting, turning with the dispenser.
-        spunBetween(barrelStart, barrelEnd, radius = AUGER_RADIUS * 0.82f, spinDeg = payload.pumpAngle)
-        program.setModel(model, 0.78f, 0.80f, 0.84f, specular = 0.75f, shininess = 64f, rim = 0.6f)
-        thread.draw(program)
-
-        // Drive motor on the inboard end.
-        val motorMid = add(barrelStart, scale(out, -0.032f))
-        cylinderBetween3(add(motorMid, scale(out, 0.030f)), add(motorMid, scale(out, -0.030f)), radius = 0.040f)
-        program.setModel(model, 0.13f, 0.13f, 0.14f, specular = 0.35f, shininess = 30f)
-        cyl.draw(program)
-
-        // Discharge spout, turned down at the tip.
-        val spoutTop = add(barrelEnd, scale(out, -0.012f))
-        val spoutTip = add(spoutTop, scale(axis, -AUGER_SPOUT))
-        cylinderBetween3(spoutTop, spoutTip, radius = AUGER_RADIUS * 0.66f)
-        program.setModel(model, 0.34f, 0.37f, 0.41f, specular = 0.7f, shininess = 56f, rim = 0.5f)
-        cyl.draw(program)
-        return spoutTip
     }
 
     /**
@@ -1135,12 +1109,6 @@ class SceneRenderer(
         /** Radius of the neck joining the wrist race to the vessel flange (change 16.6). */
         const val NECK_RADIUS = 0.040f
         const val HOPPER_HEIGHT = 0.045f
-
-        // Screw auger, for dosing powder.
-        const val AUGER_RADIUS = 0.030f
-        const val AUGER_LENGTH = 0.105f
-        const val AUGER_BACK = 0.030f
-        const val AUGER_SPOUT = 0.040f
 
         // Peristaltic head, for dosing liquid.
         const val PUMP_RADIUS = 0.056f

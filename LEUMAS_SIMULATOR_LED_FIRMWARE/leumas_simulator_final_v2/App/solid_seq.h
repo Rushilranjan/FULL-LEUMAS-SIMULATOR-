@@ -43,7 +43,19 @@
  *                was dark in every run. The two lines share nothing, so its
  *                timing is the most relaxed of the four.
  *
- * All four run SS1_CYCLES cycles and then park. None ever starts another.
+ *   SEQUENCE 5   BOTH LINES AT ONCE -- sequence 1 and sequence 3 together,
+ *                same modules and same positions:
+ *                    macro 2 + gravimetric -> blender 2 -> packaging
+ *                    liquid macro 2        -> vessel 2  -> bottling
+ *                Three carries per cycle, one batch on each line, and a lot is
+ *                the PAIR: packaging and bottling each ship once per cycle and
+ *                LOT:DONE waits for both. The arm is the only serial part, so
+ *                the two plants close their batches underneath it and neither
+ *                line ever waits for the other. Its timing is the loosest of
+ *                the five, because three carries per cycle gives every feeder
+ *                126 s to recharge.
+ *
+ * All five run SS1_CYCLES cycles and then park. None ever starts another.
  *
  * ---------------------------------------------------------------------------
  * SHAPE — concurrent actors, not one queue
@@ -98,7 +110,7 @@
 #include <stdbool.h>
 
 /* How many sequences the board knows. Selection cycles through 1..this. */
-#define SOLID_SEQ_COUNT   4u
+#define SOLID_SEQ_COUNT   5u
 
 typedef enum {
     SS1_IDLE = 0,    /* never started, or stopped                             */
@@ -134,5 +146,16 @@ Ss1Status   solid_seq_state(void);
 uint8_t     solid_seq_running(void);   /* sequence being run, 0 when idle     */
 uint8_t     solid_seq_cycle(void);     /* 1..SS1_CYCLES, 0 when idle          */
 const char *solid_seq_step_name(void); /* for the `seq` console line          */
+
+/* Packaging/bottling actor state, for the `mods` console line (change 30).
+ *
+ * The wire has no message for a module going dark and none at all for the
+ * packaging actor's internal state, so a lot that stalls half-assembled is
+ * invisible to both the app and the console -- which is exactly the bug this
+ * was added to find. Writes the batches-in and batches-needed counts and
+ * returns the state name. */
+uint8_t     solid_seq_pack_count(void);
+const char *solid_seq_pack_state(uint8_t index,
+                                 uint8_t *batches_in, uint8_t *batches_needed);
 
 #endif /* APP_SOLID_SEQ_H */

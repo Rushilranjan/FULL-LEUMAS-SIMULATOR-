@@ -17,7 +17,7 @@
 ../App/led_cmd.c:472:13:cmd_seq	152	static
 ../App/led_cmd.c:533:13:seq_owns_strip	88	static
 ../App/led_cmd.c:547:13:cmd_speed	120	static
-../App/led_cmd.c:585:13:exec	256	static
-../App/led_cmd.c:725:13:handle_char	16	static
-../App/led_cmd.c:755:6:led_cmd_init	104	static
-../App/led_cmd.c:777:6:led_cmd_poll	16	static
+../App/led_cmd.c:585:13:exec	272	static
+../App/led_cmd.c:751:13:handle_char	16	static
+../App/led_cmd.c:781:6:led_cmd_init	104	static
+../App/led_cmd.c:803:6:led_cmd_poll	16	static

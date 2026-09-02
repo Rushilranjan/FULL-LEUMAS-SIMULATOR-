@@ -12,6 +12,10 @@
  * nothing else; the programs below are what actually decide the sizes. */
 #define SS1_MAX_FEEDERS   3u
 #define SS1_MAX_BLENDERS  2u
+/* Change 31: a program may now have more than one packaging station, because
+ * sequence 5 runs the solid and liquid lines together and each line ships out
+ * of its own module onto its own exit run. */
+#define SS1_MAX_PACKS     2u
 #define SS1_MAX_CARRIES   4u   /* per cycle */
 
 /* ---- strip spans ---------------------------------------------------------
@@ -191,6 +195,22 @@ _Static_assert(SS1_LMACRO_CHARGE_MS < SS1_T_CARRY,
 _Static_assert(SS1_LMACRO1_CHARGE_MS == SS1_LMACRO_CHARGE_MS,
                "the two liquid macros must recharge in step");
 
+/* Change 31: sequence 5 runs both lines, so a program can have two packaging
+ * stations and three feeders at once. These are the array bounds every program
+ * is indexed against. */
+_Static_assert(SS1_MAX_PACKS >= 2u,
+               "sequence 5 needs two packaging stations");
+_Static_assert(SS1_MAX_FEEDERS >= 3u,
+               "sequences 2 and 5 need three feeders");
+_Static_assert(SS1_MAX_BLENDERS >= 2u,
+               "sequences 2, 4 and 5 need two blenders");
+
+/* The solid and liquid exit runs must not overlap: in sequence 5 they can be
+ * animating at the same time, on separate animators, and an overlap would have
+ * them fighting over the same pixels with no arbitration at all. */
+_Static_assert(SOLID_EXIT_B < LIQUID_EXIT_A || LIQUID_EXIT_B < SOLID_EXIT_A,
+               "the two exit runs must be disjoint to ship concurrently");
+
 /* ======================================================================
  * Animators
  *
@@ -291,7 +311,16 @@ typedef struct {
 typedef struct {
     uint8_t slot;
     uint8_t needs;         /* materials per batch                           */
+    uint8_t pack;          /* which packaging station it ships to           */
 } Ss1BlenderSpec;
+
+/* A packaging station: where finished batches go and the run a lot leaves on.
+ * There is one of these per LINE, not per sequence (change 31). */
+typedef struct {
+    uint8_t slot;
+    uint8_t needs;         /* blender batches per shipment                  */
+    uint8_t out_a, out_b;  /* the exit run it ships on                      */
+} Ss1PackSpec;
 
 typedef struct {
     uint8_t feeder;        /* index into the program's feeders              */
@@ -306,9 +335,14 @@ typedef struct {
     uint8_t               blender_count;
     const Ss1CarrySpec   *carries;
     uint8_t               carries_per_cycle;
-    uint8_t               pack_slot;
-    uint8_t               pack_needs;   /* blender batches per lot           */
-    uint8_t               out_a, out_b; /* the exit run a lot leaves on      */
+    const Ss1PackSpec    *packs;
+    uint8_t               pack_count;
+    /* How many station shipments make ONE lot. This is 1 everywhere except
+     * sequence 5, where a lot is not finished until BOTH lines have shipped --
+     * see the note on SEQ5. Getting this wrong does not merely miscount: the
+     * app derives its cycle display from LOT:DONE, and S_ARM_DONE waits on
+     * s_lots reaching SS1_CYCLES, so a double count would end the run early. */
+    uint8_t               lot_ships;
 } Ss1Program;
 
 /* ---- sequence 1: macro + gravimetric -> blender 2 -> packaging ----------- */
@@ -318,7 +352,10 @@ static const Ss1FeederSpec SEQ1_FEEDERS[] = {
     { SS1_SLOT_GRAVIMETRIC, SS1_CHARGE_FILL_GRAV_MS  },
 };
 static const Ss1BlenderSpec SEQ1_BLENDERS[] = {
-    { SS1_SLOT_BLENDER, 2u },
+    { SS1_SLOT_BLENDER, 2u, 0u },
+};
+static const Ss1PackSpec SEQ1_PACKS[] = {
+    { SS1_SLOT_PACKAGING, 1u, SOLID_EXIT_A, SOLID_EXIT_B },
 };
 static const Ss1CarrySpec SEQ1_CARRIES[] = {
     { 0u, 0u },   /* macro       -> blender */
@@ -341,8 +378,11 @@ static const Ss1FeederSpec SEQ2_FEEDERS[] = {
     { SS1_SLOT_GRAVIMETRIC, SS1_CHARGE_FILL_GRAV_MS   },
 };
 static const Ss1BlenderSpec SEQ2_BLENDERS[] = {
-    { SS1_SLOT_BLENDER1, 2u },
-    { SS1_SLOT_BLENDER,  2u },
+    { SS1_SLOT_BLENDER1, 2u, 0u },
+    { SS1_SLOT_BLENDER,  2u, 0u },
+};
+static const Ss1PackSpec SEQ2_PACKS[] = {
+    { SS1_SLOT_PACKAGING, 2u, SOLID_EXIT_A, SOLID_EXIT_B },
 };
 static const Ss1CarrySpec SEQ2_CARRIES[] = {
     { 0u, 0u },   /* macro 1     -> blender 1 */
@@ -364,7 +404,10 @@ static const Ss1FeederSpec SEQ3_FEEDERS[] = {
     { SS1_SLOT_LMACRO2, SS1_CHARGE_FILL_LIQUID_MS },
 };
 static const Ss1BlenderSpec SEQ3_BLENDERS[] = {
-    { SS1_SLOT_VESSEL2, 1u },   /* one dose is a batch */
+    { SS1_SLOT_VESSEL2, 1u, 0u },   /* one dose is a batch */
+};
+static const Ss1PackSpec SEQ3_PACKS[] = {
+    { SS1_SLOT_BOTTLING, 1u, LIQUID_EXIT_A, LIQUID_EXIT_B },
 };
 static const Ss1CarrySpec SEQ3_CARRIES[] = {
     { 0u, 0u },   /* liquid macro -> vessel */
@@ -387,12 +430,72 @@ static const Ss1FeederSpec SEQ4_FEEDERS[] = {
     { SS1_SLOT_LMACRO2, SS1_CHARGE_FILL_LIQUID_MS  },
 };
 static const Ss1BlenderSpec SEQ4_BLENDERS[] = {
-    { SS1_SLOT_VESSEL1, 1u },   /* one dose is a batch, as in sequence 3 */
-    { SS1_SLOT_VESSEL2, 1u },
+    { SS1_SLOT_VESSEL1, 1u, 0u },   /* one dose is a batch, as in sequence 3 */
+    { SS1_SLOT_VESSEL2, 1u, 0u },
+};
+static const Ss1PackSpec SEQ4_PACKS[] = {
+    { SS1_SLOT_BOTTLING, 2u, LIQUID_EXIT_A, LIQUID_EXIT_B },
 };
 static const Ss1CarrySpec SEQ4_CARRIES[] = {
     { 0u, 0u },   /* liquid macro 1 -> vessel 1 */
     { 1u, 1u },   /* liquid macro 2 -> vessel 2 */
+};
+
+/* ---- sequence 5: both lines at once --------------------------------------
+ * Sequence 1 and sequence 3, exactly as they are, running together:
+ *
+ *     macro 2 + gravimetric -> blender 2 -> packaging  -> solid exit  17..21
+ *     liquid macro 2        -> vessel 2  -> bottling   -> liquid exit 39..43
+ *
+ * Same modules, same positions, same recharge rates as those two sequences use
+ * on their own. Nothing here is a new component; the only new thing is that
+ * both lines are alive at the same time.
+ *
+ * THE ARM IS THE ONLY SERIAL PART, which is what makes this work at all. It
+ * runs three carries per cycle -- two for the solid batch, one for the liquid --
+ * back to back at SS1_T_CARRY, and the two plants close their batches
+ * underneath it. Neither line ever waits for the other:
+ *
+ *   carry 1   macro 2      -> blender 2     blender has 1 of 2
+ *   carry 2   gravimetric  -> blender 2     blender full, starts blending
+ *   carry 3   liquid macro -> vessel 2      vessel full, starts filling
+ *
+ * A LOT IS BOTH LINES. Packaging and bottling each ship once per cycle, and
+ * lot_ships = 2 makes LOT:DONE wait for the pair -- so four cycles still means
+ * four lots, the app's cycle display still counts right, and the run still ends
+ * when it should. This is the only program where that number is not 1.
+ *
+ * TIMING IS THE LOOSEST OF ALL FIVE, because three carries per cycle means
+ * every feeder is collected once every 126 s rather than every 42 or 84:
+ *
+ *     macro 2       recharge  8.56 s     gravimetric  11.2 s
+ *     liquid macro  recharge 10.0  s     window      126 s
+ *
+ * The two lines share the ONE recharge animator, and that is safe here for a
+ * reason worth writing down: the solid feeders fill from pixel 0 and the liquid
+ * feeder from pixel 22, so their spans are disjoint and could in principle play
+ * together -- but each recharge is triggered by its own carry, and carries are
+ * 42 s apart, so they never even ask to. The two hand-off animators are the
+ * same story from the other side: blender 2 -> packaging is 13..16 and
+ * vessel 2 -> bottling is 35..38, disjoint spans that the shared animator will
+ * serialise if they ever coincide, and BL_READY waits green while it does. */
+static const Ss1FeederSpec SEQ5_FEEDERS[] = {
+    { SS1_SLOT_MACRO,       SS1_CHARGE_FILL_MACRO_MS  },
+    { SS1_SLOT_GRAVIMETRIC, SS1_CHARGE_FILL_GRAV_MS   },
+    { SS1_SLOT_LMACRO2,     SS1_CHARGE_FILL_LIQUID_MS },
+};
+static const Ss1BlenderSpec SEQ5_BLENDERS[] = {
+    { SS1_SLOT_BLENDER, 2u, 0u },   /* solid:  macro + gravimetric  -> pack 0 */
+    { SS1_SLOT_VESSEL2, 1u, 1u },   /* liquid: one dose is a batch  -> pack 1 */
+};
+static const Ss1CarrySpec SEQ5_CARRIES[] = {
+    { 0u, 0u },   /* macro 2      -> blender 2 */
+    { 1u, 0u },   /* gravimetric  -> blender 2 */
+    { 2u, 1u },   /* liquid macro -> vessel 2  */
+};
+static const Ss1PackSpec SEQ5_PACKS[] = {
+    { SS1_SLOT_PACKAGING, 1u, SOLID_EXIT_A,  SOLID_EXIT_B  },
+    { SS1_SLOT_BOTTLING,  1u, LIQUID_EXIT_A, LIQUID_EXIT_B },
 };
 
 static const Ss1Program SS_PROGRAMS[SOLID_SEQ_COUNT] = {
@@ -401,32 +504,35 @@ static const Ss1Program SS_PROGRAMS[SOLID_SEQ_COUNT] = {
         .feeders = SEQ1_FEEDERS,   .feeder_count  = 2u,
         .blenders = SEQ1_BLENDERS, .blender_count = 1u,
         .carries = SEQ1_CARRIES,   .carries_per_cycle = 2u,
-        .pack_slot = SS1_SLOT_PACKAGING, .pack_needs = 1u,
-        .out_a = SOLID_EXIT_A, .out_b = SOLID_EXIT_B,
+        .packs = SEQ1_PACKS, .pack_count = 1u, .lot_ships = 1u,
     },
     {
         .number = 2u,
         .feeders = SEQ2_FEEDERS,   .feeder_count  = 3u,
         .blenders = SEQ2_BLENDERS, .blender_count = 2u,
         .carries = SEQ2_CARRIES,   .carries_per_cycle = 4u,
-        .pack_slot = SS1_SLOT_PACKAGING, .pack_needs = 2u,
-        .out_a = SOLID_EXIT_A, .out_b = SOLID_EXIT_B,
+        .packs = SEQ2_PACKS, .pack_count = 1u, .lot_ships = 1u,
     },
     {
         .number = 3u,
         .feeders = SEQ3_FEEDERS,   .feeder_count  = 1u,
         .blenders = SEQ3_BLENDERS, .blender_count = 1u,
         .carries = SEQ3_CARRIES,   .carries_per_cycle = 1u,
-        .pack_slot = SS1_SLOT_BOTTLING, .pack_needs = 1u,
-        .out_a = LIQUID_EXIT_A, .out_b = LIQUID_EXIT_B,
+        .packs = SEQ3_PACKS, .pack_count = 1u, .lot_ships = 1u,
     },
     {
         .number = 4u,
         .feeders = SEQ4_FEEDERS,   .feeder_count  = 2u,
         .blenders = SEQ4_BLENDERS, .blender_count = 2u,
         .carries = SEQ4_CARRIES,   .carries_per_cycle = 2u,
-        .pack_slot = SS1_SLOT_BOTTLING, .pack_needs = 2u,
-        .out_a = LIQUID_EXIT_A, .out_b = LIQUID_EXIT_B,
+        .packs = SEQ4_PACKS, .pack_count = 1u, .lot_ships = 1u,
+    },
+    {
+        .number = 5u,
+        .feeders = SEQ5_FEEDERS,   .feeder_count  = 3u,
+        .blenders = SEQ5_BLENDERS, .blender_count = 2u,
+        .carries = SEQ5_CARRIES,   .carries_per_cycle = 3u,
+        .packs = SEQ5_PACKS, .pack_count = 2u, .lot_ships = 2u,
     },
 };
 
@@ -470,6 +576,7 @@ typedef struct {
     uint8_t   slot;
     uint8_t   needs;
     uint8_t   materials;
+    uint8_t   pack;             /* station index it hands off to             */
     uint8_t   flow_a, flow_b;   /* its hand-off span, derived at init        */
     SoftTimer t;
 } Ss1Blender;
@@ -529,10 +636,30 @@ static Ss1Charge  s_charge;     /* shared: every feeder's span overlaps      */
 static Ss1Flow s_flow_xfer;
 static uint8_t s_flow_xfer_owner = SS1_NO_OWNER;
 
-static Ss1PackPhase s_pack;
-static uint8_t      s_pack_batches;
-static SoftTimer    s_pack_timer;
-static Ss1Flow      s_flow_out;       /* packaging -> exit run               */
+/* A packaging station. Change 31 made this an array: it was a set of loose
+ * globals, which is precisely why only one line could ship at a time.
+ *
+ * Each station owns its OWN exit-run animator. That is not tidiness -- the two
+ * exit runs are disjoint spans (17..21 and 39..43) and in sequence 5 they can
+ * genuinely be shipping at the same time, so sharing one animator would make
+ * one line wait on the other for no physical reason. Contrast the blender
+ * hand-off animator below, which is shared on purpose because those spans
+ * overlap and truly cannot both play. */
+typedef struct {
+    Ss1PackPhase phase;
+    uint8_t   slot;
+    uint8_t   needs;
+    uint8_t   out_a, out_b;
+    uint8_t   batches;
+    SoftTimer t;
+    Ss1Flow   flow;           /* this station -> its exit run                */
+} Ss1Pack;
+
+static Ss1Pack s_pack[SS1_MAX_PACKS];
+
+/* Shipments banked toward the current lot. A lot closes when this reaches
+ * s_prog->lot_ships, NOT when any one station ships. */
+static uint8_t s_lot_ships;
 
 static uint8_t total_carries(void)
 {
@@ -830,56 +957,79 @@ static void feeder_tick(Ss1Feeder *f)
  * get away with no forward declarations at all.
  * ==================================================================== */
 
+static void pack_init(Ss1Pack *p, const Ss1PackSpec *spec)
+{
+    p->phase   = PK_IDLE;
+    p->slot    = spec->slot;
+    p->needs   = spec->needs;
+    p->out_a   = spec->out_a;
+    p->out_b   = spec->out_b;
+    p->batches = 0u;
+    timer_stop(&p->t);
+    ss1_flow_reset(&p->flow);
+}
+
 static void packaging_reset(void)
 {
-    s_pack         = PK_IDLE;
-    s_pack_batches = 0u;
-    timer_stop(&s_pack_timer);
+    s_lot_ships = 0u;
+    for (uint8_t i = 0u; i < SS1_MAX_PACKS; i++) {
+        /* Stations beyond this program's count are zeroed rather than left
+         * holding the previous run's state, so a switch from sequence 5 to a
+         * one-line sequence cannot leave a stale station ticking. */
+        if (s_prog != NULL && i < s_prog->pack_count) {
+            pack_init(&s_pack[i], &s_prog->packs[i]);
+        } else {
+            s_pack[i].phase   = PK_IDLE;
+            s_pack[i].batches = 0u;
+            timer_stop(&s_pack[i].t);
+            ss1_flow_reset(&s_pack[i].flow);
+        }
+    }
 }
 
 /* A blender's batch has finished crossing and is now in. */
-static void packaging_receive(void)
+static void pack_receive(Ss1Pack *p)
 {
-    if (s_pack_batches < s_prog->pack_needs) {
-        s_pack_batches++;
+    if (p->batches < p->needs) {
+        p->batches++;
     } else {
         return;                      /* a full lot cannot take more */
     }
 
-    set_mod(s_prog->pack_slot, MOD_RUNNING);
+    set_mod(p->slot, MOD_RUNNING);
 
-    if (s_pack_batches >= s_prog->pack_needs) {
-        s_pack = PK_FINISHING;
-        timer_start(&s_pack_timer, SS1_PACKAGING_FINISH_MS);
+    if (p->batches >= p->needs) {
+        p->phase = PK_FINISHING;
+        timer_start(&p->t, SS1_PACKAGING_FINISH_MS);
     } else {
-        s_pack = PK_ACK;
-        timer_start(&s_pack_timer, SS1_RECEIVE_ACK_MS);
+        p->phase = PK_ACK;
+        timer_start(&p->t, SS1_RECEIVE_ACK_MS);
     }
 }
 
-static void packaging_tick(void)
+static void pack_tick(Ss1Pack *p)
 {
-    switch (s_pack) {
+    switch (p->phase) {
     /* Acknowledged; there is still only part of a lot in there, so it goes
      * dark rather than sitting lit for the carries it has to wait. */
     case PK_ACK:
-        if (timer_expired(&s_pack_timer)) {
-            set_mod(s_prog->pack_slot, MOD_OFF);
-            s_pack = PK_HOLDING;
+        if (timer_expired(&p->t)) {
+            set_mod(p->slot, MOD_OFF);
+            p->phase = PK_HOLDING;
         }
         break;
 
     case PK_FINISHING:
-        if (timer_expired(&s_pack_timer)) {
-            set_mod(s_prog->pack_slot, MOD_READY);
-            ss1_flow_start(&s_flow_out, s_prog->out_a, s_prog->out_b,
+        if (timer_expired(&p->t)) {
+            set_mod(p->slot, MOD_READY);
+            ss1_flow_start(&p->flow, p->out_a, p->out_b,
                            SS1_FLOW_OUTPUT_PASSES);
-            s_pack = PK_SHIPPING;
+            p->phase = PK_SHIPPING;
         }
         break;
 
     case PK_SHIPPING:
-        if (ss1_flow_done(&s_flow_out)) {
+        if (ss1_flow_done(&p->flow)) {
             /* The lot is out of the door, and change 13.2 makes THIS the cycle
              * boundary — not a reset, not a blank board, not anything the arm
              * takes part in. The arm is already well into the next lot's
@@ -891,19 +1041,56 @@ static void packaging_tick(void)
              * change on both sides for a number the app can already derive), so
              * the app counts these to drive its cycle display. Keep the emit
              * and the increment adjacent: they are the same event. */
-            ble_lot_done();
-            s_lots++;
-            if (s_cycle < SS1_CYCLES) {
-                s_cycle++;              /* lot 1 done -> "cycle 2" on the app */
+            set_mod(p->slot, MOD_OFF);
+            p->phase   = PK_IDLE;
+            p->batches = 0u;
+
+            /* Change 31: a station shipping is not necessarily a LOT. In
+             * sequence 5 the solid and liquid lines each ship once per cycle
+             * and the lot is the pair, so the counter only ticks when the last
+             * outstanding line is in. Everywhere else lot_ships is 1 and this
+             * is exactly the old behaviour. */
+            s_lot_ships++;
+            if (s_lot_ships >= s_prog->lot_ships) {
+                s_lot_ships = 0u;
+                ble_lot_done();
+                s_lots++;
+                if (s_cycle < SS1_CYCLES) {
+                    s_cycle++;          /* lot 1 done -> "cycle 2" on the app */
+                }
             }
-            set_mod(s_prog->pack_slot, MOD_OFF);
-            s_pack         = PK_IDLE;
-            s_pack_batches = 0u;
         }
         break;
 
     default:
         break;
+    }
+}
+
+uint8_t solid_seq_pack_count(void)
+{
+    return (s_prog != NULL) ? s_prog->pack_count : 0u;
+}
+
+const char *solid_seq_pack_state(uint8_t index,
+                                 uint8_t *batches_in, uint8_t *batches_needed)
+{
+    if (index >= SS1_MAX_PACKS) {
+        return "-";
+    }
+    if (batches_in != NULL) {
+        *batches_in = s_pack[index].batches;
+    }
+    if (batches_needed != NULL) {
+        *batches_needed = s_pack[index].needs;
+    }
+    switch (s_pack[index].phase) {
+    case PK_IDLE:      return "IDLE";
+    case PK_ACK:       return "ACK";
+    case PK_HOLDING:   return "HOLD";
+    case PK_FINISHING: return "FINISH";
+    case PK_SHIPPING:  return "SHIP";
+    default:           return "?";
     }
 }
 
@@ -917,8 +1104,9 @@ static void blender_init(Ss1Blender *b, const Ss1BlenderSpec *spec)
     b->slot      = spec->slot;
     b->needs     = spec->needs;
     b->materials = 0u;
+    b->pack      = spec->pack;
     b->flow_a    = SS1_FLOW_A(spec->slot);
-    b->flow_b    = SS1_FLOW_B(s_prog->pack_slot);
+    b->flow_b    = SS1_FLOW_B(s_prog->packs[spec->pack].slot);
     timer_stop(&b->t);
 }
 
@@ -995,7 +1183,7 @@ static void blender_tick(Ss1Blender *b, uint8_t index)
             b->phase     = BL_EMPTY;
             b->materials = 0u;
             s_flow_xfer_owner = SS1_NO_OWNER;
-            packaging_receive();
+            pack_receive(&s_pack[b->pack]);
         }
         break;
 
@@ -1013,7 +1201,6 @@ static void ss1_reset_transient(void)
     timer_stop(&s_timer);
     ss1_charge_reset(&s_charge);
     ss1_flow_reset(&s_flow_xfer);
-    ss1_flow_reset(&s_flow_out);
     s_flow_xfer_owner = SS1_NO_OWNER;
 
     for (uint8_t i = 0u; i < s_prog->feeder_count; i++) {
@@ -1267,14 +1454,16 @@ void solid_seq_tick(void)
      * file: the plant is never waiting for its turn. */
     ss1_charge_tick(&s_charge);
     ss1_flow_tick(&s_flow_xfer);
-    ss1_flow_tick(&s_flow_out);
     for (uint8_t i = 0u; i < s_prog->feeder_count; i++) {
         feeder_tick(&s_feeder[i]);
     }
     for (uint8_t i = 0u; i < s_prog->blender_count; i++) {
         blender_tick(&s_blender[i], i);
     }
-    packaging_tick();
+    for (uint8_t i = 0u; i < s_prog->pack_count; i++) {
+        ss1_flow_tick(&s_pack[i].flow);
+        pack_tick(&s_pack[i]);
+    }
 
     switch (s_step) {
     /* The priming fills, each waiting on the shared animator rather than on a

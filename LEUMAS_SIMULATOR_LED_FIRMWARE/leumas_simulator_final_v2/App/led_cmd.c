@@ -647,18 +647,44 @@ static void exec(char *line)
          * change 21 (a dump must hold blue for ten seconds) actually asks for.
          *
          * One line, fixed width, so it can be sampled in a loop and diffed. */
-        char mb[72];
+        /* Change 30: this covered the six SOLID modules only, so the whole
+         * liquid line -- including Bottling -- was invisible to the one tool
+         * that can measure a colour. That is why "bottling never goes green"
+         * could only be argued about rather than observed. Every module now,
+         * with a bar between the two lines, plus the packaging actor's state
+         * and how much of a lot is in: a lot that stalls half-assembled looks
+         * identical from outside to one that never started. */
+        char mb[MODULE_COUNT + 2u];
         uint8_t n = 0u;
-        for (uint8_t sl = 0u; sl < 6u; sl++) {
-            char c = (module_get_state(sl) == MOD_RUNNING) ? 'B'
-                   : (module_get_state(sl) == MOD_READY)   ? 'G'
-                                                           : '.';
-            mb[n++] = c;
+        for (uint8_t sl = 0u; sl < (uint8_t)MODULE_COUNT; sl++) {
+            if (sl == 6u) {
+                mb[n++] = '|';          /* solid | liquid */
+            }
+            mb[n++] = (module_get_state(sl) == MOD_RUNNING) ? 'B'
+                    : (module_get_state(sl) == MOD_READY)   ? 'G'
+                                                            : '.';
         }
         mb[n] = 0;
         {
-            char ob[64];
-            snprintf(ob, sizeof(ob), "mods %s\r\n", mb);
+            /* Change 31: a sequence may run more than one packaging station,
+             * so print every one -- sequence 5 stalling on ONE line is exactly
+             * the failure this line has to be able to show. */
+            char pb[48];
+            uint8_t pn = 0u;
+            uint8_t np = solid_seq_pack_count();
+            pb[0] = 0;
+            for (uint8_t i = 0u; i < np && pn < (uint8_t)(sizeof(pb) - 16u); i++) {
+                uint8_t in = 0u, need = 0u;
+                const char *pk = solid_seq_pack_state(i, &in, &need);
+                pn = (uint8_t)(pn + (uint8_t)snprintf(&pb[pn], sizeof(pb) - pn,
+                                                     "%s%s %u/%u",
+                                                     (i > 0u) ? " + " : "",
+                                                     pk, (unsigned)in,
+                                                     (unsigned)need));
+            }
+            char ob[96];
+            snprintf(ob, sizeof(ob), "mods %s  pack=%s\r\n",
+                     mb, (np > 0u) ? pb : "-");
             out(ob);
         }
     } else if (strcmp(cmd, "recipe") == 0) {
