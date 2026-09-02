@@ -16,6 +16,18 @@
  * sequence 5 runs the solid and liquid lines together and each line ships out
  * of its own module onto its own exit run. */
 #define SS1_MAX_PACKS     2u
+
+/* A LINE is a status run. Every feeder on one fills from the same base pixel,
+ * which is exactly why their spans overlap and why they have to share a
+ * recharge animator. The rig has two -- the solid line fills from 0, the liquid
+ * line from 22 -- and being disjoint, the two CAN animate at the same time.
+ *
+ * Change 32 gave each line its own animator for that reason: sequence 5 runs
+ * both lines and has to charge them together, not one after the other. */
+#define SS1_MAX_LINES     2u
+#define SS1_LINE_SOLID    0u
+#define SS1_LINE_LIQUID   1u
+#define SS1_NO_FEEDER     0xFFu
 #define SS1_MAX_CARRIES   4u   /* per cycle */
 
 /* ---- strip spans ---------------------------------------------------------
@@ -551,6 +563,7 @@ typedef enum {
 typedef struct {
     Ss1FeederPhase phase;
     uint8_t   slot;
+    uint8_t   line;        /* which status run it fills; see SS1_MAX_LINES    */
     uint8_t   span_a, span_b;
     uint16_t  fill_ms;
     /* Change 23: its release cue arrived while it was still recharging or
@@ -623,12 +636,39 @@ static Ss1Step   s_step;
 static uint8_t   s_cycle;       /* 1..SS1_CYCLES, 0 when idle                */
 static uint8_t   s_lots;        /* lots shipped; change 13.2 drives s_cycle  */
 static uint8_t   s_carry;       /* 1..total carries, 0 outside one           */
-static uint8_t   s_prime;       /* feeder index being primed                 */
 static SoftTimer s_timer;       /* the ROBOT chain's timer, nothing else     */
 
 static Ss1Feeder  s_feeder[SS1_MAX_FEEDERS];
 static Ss1Blender s_blender[SS1_MAX_BLENDERS];
-static Ss1Charge  s_charge;     /* shared: every feeder's span overlaps      */
+/* One per line. Within a line the spans overlap and must take turns; between
+ * lines they are disjoint and run concurrently (change 32). */
+static Ss1Charge  s_charge[SS1_MAX_LINES];
+
+/* Which feeder each line is priming, SS1_NO_FEEDER when that line is done. */
+static uint8_t    s_prime[SS1_MAX_LINES];
+
+/* Which status run a slot belongs to. Derived from the pixel map rather than
+ * from the slot number, so re-measuring the rig moves this with it. */
+static uint8_t line_of_slot(uint8_t slot)
+{
+    return (SLOT_LEDS[slot].st_base == SLOT_LEDS[SS1_SLOT_MACRO1].st_base)
+             ? SS1_LINE_SOLID : SS1_LINE_LIQUID;
+}
+
+/* The next feeder on `line` after index `after`, in program order, or
+ * SS1_NO_FEEDER when that line has none left. Program order is the order the
+ * sequence itself first collects them, which is what makes the priming fills
+ * read as the line being walked from one end to the other. */
+static uint8_t next_feeder_on_line(uint8_t line, uint8_t after)
+{
+    uint8_t from = (after == SS1_NO_FEEDER) ? 0u : (uint8_t)(after + 1u);
+    for (uint8_t i = from; i < s_prog->feeder_count; i++) {
+        if (s_feeder[i].line == line) {
+            return i;
+        }
+    }
+    return SS1_NO_FEEDER;
+}
 
 /* Shared blender -> packaging animator. The blenders' spans overlap, so only
  * one may play at a time and the others queue in BL_READY. NONE when free. */
@@ -839,6 +879,7 @@ static void feeder_init(Ss1Feeder *f, const Ss1FeederSpec *spec)
 {
     f->phase   = FD_IDLE;
     f->slot    = spec->slot;
+    f->line    = line_of_slot(spec->slot);
     f->span_a  = SS1_SPAN_A(spec->slot);
     f->span_b  = SS1_SPAN_B(spec->slot);
     f->fill_ms = spec->fill_ms;
@@ -897,19 +938,27 @@ static void feeder_release(Ss1Feeder *f)
  * with the next carry. */
 static void feeder_recharge(Ss1Feeder *f)
 {
-    /* The recharge animator is shared, because every feeder's span starts at
-     * the line's base. By the asserts above a previous recharge is always long
-     * finished by now, but if a retune ever broke that, taking the animator
-     * away from a feeder still waiting on it would strand that feeder dark for
-     * the rest of the run. Promote it instead: losing the tail of an animation
-     * is a blemish, a module that never comes back is a dead demo. */
+    /* The recharge animator is shared BY LINE, because every feeder on a line
+     * fills from that line's base and so their spans overlap. By the asserts
+     * above a previous recharge is always long finished by now, but if a retune
+     * ever broke that, taking the animator away from a feeder still waiting on
+     * it would strand that feeder dark for the rest of the run. Promote it
+     * instead: losing the tail of an animation is a blemish, a module that
+     * never comes back is a dead demo.
+     *
+     * Change 32: only feeders on the SAME line are evicted. Before there was
+     * one animator for the rig, so a solid recharge would knock a liquid feeder
+     * out of its own animation even though their pixels never touch -- which is
+     * precisely the interference sequence 5 would have suffered. */
     for (uint8_t i = 0u; i < s_prog->feeder_count; i++) {
-        if (&s_feeder[i] != f && s_feeder[i].phase == FD_CHARGING) {
+        if (&s_feeder[i] != f && s_feeder[i].line == f->line
+            && s_feeder[i].phase == FD_CHARGING) {
             feeder_producing(&s_feeder[i]);
         }
     }
 
-    ss1_charge_start(&s_charge, f->span_a, f->span_b, f->slot, f->fill_ms);
+    ss1_charge_start(&s_charge[f->line], f->span_a, f->span_b,
+                     f->slot, f->fill_ms);
     f->phase = FD_CHARGING;
 }
 
@@ -921,7 +970,8 @@ static void feeder_tick(Ss1Feeder *f)
          * finished — a later feeder taking the animator over is not this
          * feeder's completion. The asserts make that impossible by timing, but
          * the check costs nothing and keeps the failure mode obvious. */
-        if (ss1_charge_done(&s_charge) && s_charge.owner == f->slot) {
+        if (ss1_charge_done(&s_charge[f->line])
+            && s_charge[f->line].owner == f->slot) {
             feeder_producing(f);
         }
         break;
@@ -1199,7 +1249,10 @@ static void blender_tick(Ss1Blender *b, uint8_t index)
 static void ss1_reset_transient(void)
 {
     timer_stop(&s_timer);
-    ss1_charge_reset(&s_charge);
+    for (uint8_t l = 0u; l < SS1_MAX_LINES; l++) {
+        ss1_charge_reset(&s_charge[l]);
+        s_prime[l] = SS1_NO_FEEDER;
+    }
     ss1_flow_reset(&s_flow_xfer);
     s_flow_xfer_owner = SS1_NO_OWNER;
 
@@ -1211,7 +1264,6 @@ static void ss1_reset_transient(void)
     }
     packaging_reset();
     s_carry = 0u;
-    s_prime = 0u;
     seq_leds_strip_clear();
 }
 
@@ -1271,10 +1323,20 @@ static void enter_step(Ss1Step s)
      * Sequential because it has to be: every feeder's span starts at the line's
      * base, so they all overlap and there is one animator. In program order,
      * which is the order the sequence itself first collects them. */
+    /* Change 32: EVERY line starts priming at once. Within a line the feeders
+     * still go in program order, because their spans overlap; between lines
+     * they are disjoint and run together, so in sequence 5 the solid and liquid
+     * macros fill side by side and finish together rather than the liquid line
+     * waiting out the whole solid line first. */
     case S_PRIME:
-        ss1_charge_start(&s_charge,
-                         s_feeder[s_prime].span_a, s_feeder[s_prime].span_b,
-                         s_feeder[s_prime].slot,   s_feeder[s_prime].fill_ms);
+        for (uint8_t l = 0u; l < SS1_MAX_LINES; l++) {
+            s_prime[l] = next_feeder_on_line(l, SS1_NO_FEEDER);
+            if (s_prime[l] != SS1_NO_FEEDER) {
+                const Ss1Feeder *f = &s_feeder[s_prime[l]];
+                ss1_charge_start(&s_charge[l], f->span_a, f->span_b,
+                                 f->slot, f->fill_ms);
+            }
+        }
         break;
 
     /* Every feeder primed: now they light, together, and start producing. */
@@ -1452,7 +1514,23 @@ void solid_seq_tick(void)
     /* Everything that is not the arm runs here, every pass, regardless of what
      * step the robot chain is on. This is what "simultaneously" means in this
      * file: the plant is never waiting for its turn. */
-    ss1_charge_tick(&s_charge);
+    for (uint8_t l = 0u; l < SS1_MAX_LINES; l++) {
+        ss1_charge_tick(&s_charge[l]);
+    }
+    /* Each line walks its own feeders while priming, independently of the
+     * others, so a short line does not hold a long one up or vice versa. */
+    if (s_step == S_PRIME) {
+        for (uint8_t l = 0u; l < SS1_MAX_LINES; l++) {
+            if (s_prime[l] != SS1_NO_FEEDER && ss1_charge_done(&s_charge[l])) {
+                s_prime[l] = next_feeder_on_line(l, s_prime[l]);
+                if (s_prime[l] != SS1_NO_FEEDER) {
+                    const Ss1Feeder *f = &s_feeder[s_prime[l]];
+                    ss1_charge_start(&s_charge[l], f->span_a, f->span_b,
+                                     f->slot, f->fill_ms);
+                }
+            }
+        }
+    }
     ss1_flow_tick(&s_flow_xfer);
     for (uint8_t i = 0u; i < s_prog->feeder_count; i++) {
         feeder_tick(&s_feeder[i]);
@@ -1469,7 +1547,13 @@ void solid_seq_tick(void)
     /* The priming fills, each waiting on the shared animator rather than on a
      * clock, so retuning SS1_CHARGE_FILL_* cannot desync them. */
     case S_PRIME:
-        advance = ss1_charge_done(&s_charge);
+        /* Done when every line has run out of feeders to prime. */
+        advance = true;
+        for (uint8_t l = 0u; l < SS1_MAX_LINES; l++) {
+            if (s_prime[l] != SS1_NO_FEEDER) {
+                advance = false;
+            }
+        }
         break;
 
     /* The arm leaves for the first carry when its source has finished
@@ -1504,13 +1588,10 @@ void solid_seq_tick(void)
     }
 
     switch (s_step) {
+    /* Change 32: the lines advance themselves in the per-pass block, so by the
+     * time this fires every one of them is finished. */
     case S_PRIME:
-        s_prime++;
-        if (s_prime < s_prog->feeder_count) {
-            enter_step(S_PRIME);
-        } else {
-            enter_step(S_INIT);
-        }
+        enter_step(S_INIT);
         break;
 
     case S_INIT:
