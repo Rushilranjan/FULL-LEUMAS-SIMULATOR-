@@ -31,7 +31,8 @@ App/led_cmd.o: ../App/led_cmd.c ../App/led_cmd.h ../Core/Inc/main.h \
  ../Drivers/STM32F7xx_HAL_Driver/Inc/stm32f7xx_hal_pcd.h \
  ../Drivers/STM32F7xx_HAL_Driver/Inc/stm32f7xx_ll_usb.h \
  ../Drivers/STM32F7xx_HAL_Driver/Inc/stm32f7xx_hal_pcd_ex.h \
- ../App/led_strip.h ../App/led_fx.h ../App/seq_leds.h ../App/lotmgr.h
+ ../App/led_strip.h ../App/led_fx.h ../App/seq_leds.h ../App/solid_seq.h \
+ ../App/module.h ../Core/Inc/config.h ../App/ble.h
 ../App/led_cmd.h:
 ../Core/Inc/main.h:
 ../Drivers/STM32F7xx_HAL_Driver/Inc/stm32f7xx_hal.h:
@@ -69,4 +70,7 @@ App/led_cmd.o: ../App/led_cmd.c ../App/led_cmd.h ../Core/Inc/main.h \
 ../App/led_strip.h:
 ../App/led_fx.h:
 ../App/seq_leds.h:
-../App/lotmgr.h:
+../App/solid_seq.h:
+../App/module.h:
+../Core/Inc/config.h:
+../App/ble.h:

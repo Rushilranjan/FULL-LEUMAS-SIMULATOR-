@@ -32,7 +32,7 @@ App/app.o: ../App/app.c ../App/app.h ../Core/Inc/main.h \
  ../Drivers/STM32F7xx_HAL_Driver/Inc/stm32f7xx_ll_usb.h \
  ../Drivers/STM32F7xx_HAL_Driver/Inc/stm32f7xx_hal_pcd_ex.h \
  ../Core/Inc/config.h ../App/led_strip.h ../App/led_cmd.h ../App/module.h \
- ../App/lotmgr.h ../App/seq_leds.h ../App/button.h ../App/ble.h
+ ../App/solid_seq.h ../App/seq_leds.h ../App/button.h ../App/ble.h
 ../App/app.h:
 ../Core/Inc/main.h:
 ../Drivers/STM32F7xx_HAL_Driver/Inc/stm32f7xx_hal.h:
@@ -71,7 +71,7 @@ App/app.o: ../App/app.c ../App/app.h ../Core/Inc/main.h \
 ../App/led_strip.h:
 ../App/led_cmd.h:
 ../App/module.h:
-../App/lotmgr.h:
+../App/solid_seq.h:
 ../App/seq_leds.h:
 ../App/button.h:
 ../App/ble.h:

@@ -120,7 +120,8 @@ extern const SlotLeds SLOT_LEDS[MODULE_COUNT];
 #define SS1_ACTIVE_MASK   ( (1u << SS1_SLOT_MACRO1)   | (1u << SS1_SLOT_MACRO)        | \
                             (1u << SS1_SLOT_GRAVIMETRIC) | (1u << SS1_SLOT_BLENDER1)  | \
                             (1u << SS1_SLOT_BLENDER) | (1u << SS1_SLOT_PACKAGING)     | \
-                            (1u << SS1_SLOT_LMACRO2) | (1u << SS1_SLOT_VESSEL2)       | \
+                            (1u << SS1_SLOT_LMACRO1) | (1u << SS1_SLOT_LMACRO2)       | \
+                            (1u << SS1_SLOT_VESSEL1) | (1u << SS1_SLOT_VESSEL2)       | \
                             (1u << SS1_SLOT_BOTTLING) )
 
 /* Module pixels are ALWAYS full brightness — the strip percentage above never
@@ -285,6 +286,13 @@ extern const SlotLeds SLOT_LEDS[MODULE_COUNT];
  * That is what sets this: 3 * 10 * 300 + 1000 = 10 s, leaving 2 s of margin on
  * the 32 s window. The assert in solid_seq.c is the real guard. */
 #define SS1_CHARGE_FILL_LIQUID_MS  300u  /* per pixel, 10-pixel span          */
+/* Liquid macro 1's status run is FIVE pixels (22..26), half its neighbour's, and
+ * sequence 4 runs the two side by side. Picked so the totals match exactly:
+ * 3*5*600 + 1000 = 10 s, the same as macro 2's 3*10*300 + 1000. Two parallel
+ * dosing lines that recharge at visibly different speeds would read as one of
+ * them being broken, and the per-pixel dwell has to differ for the totals to
+ * agree because the spans differ. */
+#define SS1_CHARGE_FILL_LIQUID1_MS 600u  /* per pixel, 5-pixel span           */
 #define SS1_CHARGE_FILL_MACRO1_MS  700u  /* per pixel, 2-pixel span           */
 #define SS1_CHARGE_FILL_MACRO_MS   420u  /* per pixel, 6-pixel span           */
 /* Change 12.3: eased off from 300 — the gravimetric was reading as a flicker

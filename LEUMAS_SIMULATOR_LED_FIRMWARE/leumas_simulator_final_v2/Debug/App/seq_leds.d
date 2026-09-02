@@ -32,7 +32,7 @@ App/seq_leds.o: ../App/seq_leds.c ../App/seq_leds.h ../Core/Inc/config.h \
  ../Drivers/STM32F7xx_HAL_Driver/Inc/stm32f7xx_hal_pcd.h \
  ../Drivers/STM32F7xx_HAL_Driver/Inc/stm32f7xx_ll_usb.h \
  ../Drivers/STM32F7xx_HAL_Driver/Inc/stm32f7xx_hal_pcd_ex.h \
- ../App/led_fx.h ../App/timebase.h
+ ../App/led_fx.h
 ../App/seq_leds.h:
 ../Core/Inc/config.h:
 ../App/module.h:
@@ -71,4 +71,3 @@ App/seq_leds.o: ../App/seq_leds.c ../App/seq_leds.h ../Core/Inc/config.h \
 ../Drivers/STM32F7xx_HAL_Driver/Inc/stm32f7xx_ll_usb.h:
 ../Drivers/STM32F7xx_HAL_Driver/Inc/stm32f7xx_hal_pcd_ex.h:
 ../App/led_fx.h:
-../App/timebase.h:

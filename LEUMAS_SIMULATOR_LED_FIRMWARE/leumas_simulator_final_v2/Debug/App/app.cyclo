@@ -1,5 +1,6 @@
-../App/app.c:13:6:app_init	1
-../App/app.c:29:6:app_tick	2
-../App/app.c:51:6:app_on_button_exti	1
-../App/app.c:56:6:app_on_pwm_complete	1
-../App/app.c:61:6:app_on_tim_error	1
+../App/app.c:11:6:app_init	1
+../App/app.c:25:6:app_tick	3
+../App/app.c:77:6:app_on_button_exti	1
+../App/app.c:82:6:app_on_ble_uart_irq	1
+../App/app.c:87:6:app_on_pwm_complete	1
+../App/app.c:92:6:app_on_tim_error	1

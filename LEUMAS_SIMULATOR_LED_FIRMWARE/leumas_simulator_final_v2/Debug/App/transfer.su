@@ -1,8 +1,0 @@
-../App/transfer.c:12:6:transfer_init	16	static
-../App/transfer.c:21:13:in_queue	24	static
-../App/transfer.c:31:13:push	16	static
-../App/transfer.c:39:15:pop	24	static
-../App/transfer.c:50:13:grant	16	static
-../App/transfer.c:57:6:transfer_request	24	static
-../App/transfer.c:70:6:transfer_held	16	static
-../App/transfer.c:75:6:transfer_release	24	static

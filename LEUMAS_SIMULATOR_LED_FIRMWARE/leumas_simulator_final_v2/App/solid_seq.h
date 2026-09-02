@@ -2,10 +2,10 @@
  * solid_seq.h — the solid line's hardcoded production demos.
  *
  * ---------------------------------------------------------------------------
- * TWO SEQUENCES, ONE ENGINE
+ * FOUR SEQUENCES, ONE ENGINE
  * ---------------------------------------------------------------------------
  * Change 20: this was `solid_seq1.c`, a single hardcoded sequence. There are now
- * two, and they are the SAME code driven by different data. A sequence is a
+ * four, and they are the SAME code driven by different data. A sequence is a
  * small const table — which feeders, which blenders, and the order the arm
  * carries between them — and everything else (the arm chain, the recharge and
  * flow animators, the feeder/blender/packaging actors, the cycle and lot
@@ -27,13 +27,23 @@
  *                gravimetric is collected TWICE per cycle and has to recharge
  *                in between, which is the tightest timing in the whole demo.
  *
- *   SEQUENCE 3   the LIQUID line: liquid macro -> vessel -> bottling, and out
- *                on the liquid exit run. ONE carry per cycle, so the single
+ *   SEQUENCE 3   the LIQUID line: liquid macro 2 -> vessel 2 -> bottling, and
+ *                out on the liquid exit run. ONE carry per cycle, so the single
  *                feeder is collected every carry and must recharge and produce
  *                inside one -- which is what forced the recharge to start when
  *                the arm lifts away rather than when it pours (change 23).
  *
- * Both run SS1_CYCLES cycles and then park. Neither ever starts another.
+ *   SEQUENCE 4   the whole liquid line, two dosing lines in parallel:
+ *                    liquid macro 1 -> vessel 1
+ *                    liquid macro 2 -> vessel 2
+ *                    both vessels    -> bottling
+ *                Two carries per cycle, two vessel batches, one lot. Sequence
+ *                2's shape on the liquid side, and the only sequence that uses
+ *                liquid macro 1 and vessel 1 -- before it, half the liquid rig
+ *                was dark in every run. The two lines share nothing, so its
+ *                timing is the most relaxed of the four.
+ *
+ * All four run SS1_CYCLES cycles and then park. None ever starts another.
  *
  * ---------------------------------------------------------------------------
  * SHAPE — concurrent actors, not one queue
@@ -88,7 +98,7 @@
 #include <stdbool.h>
 
 /* How many sequences the board knows. Selection cycles through 1..this. */
-#define SOLID_SEQ_COUNT   3u
+#define SOLID_SEQ_COUNT   4u
 
 typedef enum {
     SS1_IDLE = 0,    /* never started, or stopped                             */

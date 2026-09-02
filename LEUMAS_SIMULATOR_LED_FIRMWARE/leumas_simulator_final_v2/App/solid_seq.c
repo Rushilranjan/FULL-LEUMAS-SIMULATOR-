@@ -168,6 +168,29 @@ _Static_assert(SS1_LMACRO_CHARGE_MS + SS1_INITIAL_PROCESS_MS
                    < SS1_T_CARRY + SS1_ARM_TO_SOURCE_MS - SS1_ARM_COLLECT_END_MS,
                "the liquid macro must be green again before the arm returns for it");
 
+/* Sequence 4 runs both liquid macros side by side, and they share the ONE
+ * recharge animator for the same reason the solid feeders do: macro 1's status
+ * run 22..26 is a prefix of macro 2's 22..31, so the LED map physically cannot
+ * play them at once. What keeps them apart is that each is triggered by its own
+ * carry and consecutive carries are SS1_T_CARRY apart, so each recharge has to
+ * fit inside one carry. Sequence 4 is looser than sequence 3 on the OTHER
+ * constraint -- two carries per cycle means each feeder gets a whole cycle to
+ * recharge and produce, not a single carry -- so the assert above still covers
+ * the tighter case. */
+#define SS1_LIQUID1_SPAN_LEN  5u
+#define SS1_LMACRO1_CHARGE_MS SS1_CHARGE_MS(SS1_LIQUID1_SPAN_LEN, SS1_CHARGE_FILL_LIQUID1_MS)
+
+_Static_assert(SS1_LMACRO1_CHARGE_MS < SS1_T_CARRY,
+               "liquid macro 1's recharge must finish within one carry");
+_Static_assert(SS1_LMACRO_CHARGE_MS < SS1_T_CARRY,
+               "liquid macro 2's recharge must finish within one carry");
+
+/* The two liquid macros must recharge in the same total time; see the note on
+ * SS1_CHARGE_FILL_LIQUID1_MS for why. This is the guard on that, because it is
+ * the sort of thing a later retune of one span silently breaks. */
+_Static_assert(SS1_LMACRO1_CHARGE_MS == SS1_LMACRO_CHARGE_MS,
+               "the two liquid macros must recharge in step");
+
 /* ======================================================================
  * Animators
  *
@@ -347,6 +370,31 @@ static const Ss1CarrySpec SEQ3_CARRIES[] = {
     { 0u, 0u },   /* liquid macro -> vessel */
 };
 
+/* ---- sequence 4: the liquid line, in parallel ----------------------------
+ * Two liquid macros, two vessels, one bottling module, out on the liquid exit
+ * run. Sequence 2's shape moved to the liquid side: two dosing lines running
+ * concurrently, and bottling ships a lot only once BOTH vessels are in.
+ *
+ * This is the sequence that finally brings liquid macro 1 and vessel 1 into use
+ * -- until now nothing drove them, so half the liquid rig sat dark in every run.
+ *
+ * Unlike sequence 2 the two lines share nothing: each macro feeds its own
+ * vessel, so there is no equivalent of the gravimetric being collected twice a
+ * cycle, and the timing is the most relaxed of the four. Two carries per cycle
+ * gives each feeder a whole cycle to recharge and produce in. */
+static const Ss1FeederSpec SEQ4_FEEDERS[] = {
+    { SS1_SLOT_LMACRO1, SS1_CHARGE_FILL_LIQUID1_MS },
+    { SS1_SLOT_LMACRO2, SS1_CHARGE_FILL_LIQUID_MS  },
+};
+static const Ss1BlenderSpec SEQ4_BLENDERS[] = {
+    { SS1_SLOT_VESSEL1, 1u },   /* one dose is a batch, as in sequence 3 */
+    { SS1_SLOT_VESSEL2, 1u },
+};
+static const Ss1CarrySpec SEQ4_CARRIES[] = {
+    { 0u, 0u },   /* liquid macro 1 -> vessel 1 */
+    { 1u, 1u },   /* liquid macro 2 -> vessel 2 */
+};
+
 static const Ss1Program SS_PROGRAMS[SOLID_SEQ_COUNT] = {
     {
         .number = 1u,
@@ -370,6 +418,14 @@ static const Ss1Program SS_PROGRAMS[SOLID_SEQ_COUNT] = {
         .blenders = SEQ3_BLENDERS, .blender_count = 1u,
         .carries = SEQ3_CARRIES,   .carries_per_cycle = 1u,
         .pack_slot = SS1_SLOT_BOTTLING, .pack_needs = 1u,
+        .out_a = LIQUID_EXIT_A, .out_b = LIQUID_EXIT_B,
+    },
+    {
+        .number = 4u,
+        .feeders = SEQ4_FEEDERS,   .feeder_count  = 2u,
+        .blenders = SEQ4_BLENDERS, .blender_count = 2u,
+        .carries = SEQ4_CARRIES,   .carries_per_cycle = 2u,
+        .pack_slot = SS1_SLOT_BOTTLING, .pack_needs = 2u,
         .out_a = LIQUID_EXIT_A, .out_b = LIQUID_EXIT_B,
     },
 };

@@ -22,9 +22,9 @@ data class RecipeStage(
  * MCU stays the sole source of truth for *when* anything happens.
  *
  * Mirrors `App/solid_seq.c` and the `SS1_*` constants in `Core/Inc/config.h`. Change 20 turned
- * that file into a small engine driven by a per-sequence table, so there are three sequences and
- * the board button cycles between them: two on the solid line, and one on the liquid line since
- * change 23.
+ * that file into a small engine driven by a per-sequence table, so there are four sequences and
+ * the board button cycles between them: two on the solid line (23) and two on the liquid line,
+ * the second of which (change 28) is the first to drive Liquid Macro 1 and Vessel 1.
  */
 data class Recipe(
     val sequence: Int,
@@ -76,17 +76,40 @@ data class Recipe(
         )
 
         /**
-         * Sequence 3 is not solid at all: it is the LIQUID line, and the only sequence that leaves
+         * Sequence 3 is not solid at all: it is the LIQUID line, and the first sequence that leaves
          * on the liquid exit run.
          *
          * One dose from the liquid macro fills the vessel -- a batch here is a single dose, not a
          * blend of two -- and the vessel feeds bottling. One carry per cycle, which makes it the
-         * shortest of the three and the only one where the arm returns to the same module every
+         * shortest of the four and the only one where the arm returns to the same module every
          * time.
+         *
+         * **The slots were wrong until change 28: this said 7 and 9, Liquid Macro 1 and Vessel 1.**
+         * Change 24 moved the sequence to Liquid Macro 2 and Vessel 1's neighbour in the firmware
+         * and did not update the card, so the recipe named two modules the run never touched. The
+         * task card was right throughout, because it reads the MOVE events rather than this table --
+         * which is exactly why it went unnoticed.
          */
         private val SS3_STAGES = listOf(
-            RecipeStage("LIQUID MACRO", listOf(7)),
-            RecipeStage("VESSEL", listOf(9)),
+            RecipeStage("LIQUID MACRO 2", listOf(8)),
+            RecipeStage("VESSEL 2", listOf(10)),
+            RecipeStage("BOTTLING", listOf(11)),
+        )
+
+        /**
+         * Sequence 4 drives the whole liquid line: both liquid macros, both vessels, bottling.
+         *
+         * Two dosing lines running in parallel -- macro 1 fills vessel 1, macro 2 fills vessel 2 --
+         * and bottling waits for both before it ships a lot. Written as three stages rather than
+         * the four carries the arm performs, for the same reason as [SS2_STAGES]: the two lines are
+         * concurrent, so listing them sequentially would misdescribe the process.
+         *
+         * Unlike sequence 2 the two lines share nothing, so there is no module collected twice in a
+         * cycle and the timing is the most relaxed of the four.
+         */
+        private val SS4_STAGES = listOf(
+            RecipeStage("LIQUID MACRO 1 + 2", listOf(7, 8)),
+            RecipeStage("VESSEL 1 + 2", listOf(9, 10)),
             RecipeStage("BOTTLING", listOf(11)),
         )
 
@@ -116,14 +139,23 @@ data class Recipe(
                     "the vessel, which feeds bottling and ships out on the liquid exit run.",
                 line = ProductionLine.LIQUID,
                 stages = SS3_STAGES,
-                activeSlots = listOf(7, 9, 11),
+                activeSlots = listOf(8, 10, 11),
+            ),
+            4 to Recipe(
+                sequence = 4,
+                name = "LIQUID SEQUENCE 4",
+                lesson = "Four cycles on the whole liquid line: two dosing lines run in parallel, " +
+                    "and bottling ships a lot once both vessels are in.",
+                line = ProductionLine.LIQUID,
+                stages = SS4_STAGES,
+                activeSlots = listOf(7, 8, 9, 10, 11),
             ),
         )
 
         /**
          * Recipe for a sequence number, or null if the MCU announced one we do not know.
          *
-         * Sequences 1, 2 and 3 exist in the firmware; the board button cycles between them and
+         * Sequences 1 to 4 exist in the firmware; the board button cycles between them and
          * announces the choice with `RECIPE:<n>`. An unknown number is shown as-is elsewhere
          * rather than discarded, but there is no card to draw for it.
          */
