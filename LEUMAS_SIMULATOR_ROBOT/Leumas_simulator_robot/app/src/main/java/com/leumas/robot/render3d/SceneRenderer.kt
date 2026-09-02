@@ -270,7 +270,7 @@ class SceneRenderer(
         // A neon band round the turret's base, where it meets the slewing ring.
         cylinderBetween(cx, Arena3D.SHOULDER_Y - 0.165f, 0f, cx, Arena3D.SHOULDER_Y - 0.150f, 0f,
                         radius = 0.135f)
-        program.setModel(model, NEON[0], NEON[1], NEON[2], specular = 1f, shininess = 128f, rim = 1f)
+        program.setModel(model, NEON[0], NEON[1], NEON[2], specular = 1f, shininess = 128f, rim = NEON_RIM)
         cyl.draw(program)
 
         // Counterweight drum, cantilevered behind the turret (in the yawed -forward direction).
@@ -462,9 +462,9 @@ class SceneRenderer(
             // Eye around the pin, proud of the plate.
             val eye = add(b, plane)
             cylinderBetween3(
-                add(eye, scale(side, radius * 0.10f * sgn)),
-                add(eye, scale(side, radius * 0.30f * sgn)),
-                radius = radius * 0.86f,
+                add(eye, scale(side, radius * 0.06f * sgn)),
+                add(eye, scale(side, radius * 0.17f * sgn)),
+                radius = radius * 0.74f,
             )
             program.setModel(model, 0.22f, 0.23f, 0.26f, specular = 0.8f, shininess = 82f, rim = 0.5f)
             cyl.draw(program)
@@ -472,12 +472,12 @@ class SceneRenderer(
             // Neon round the eye -- the light belongs on the OUTSIDE of the fork, which is the
             // face the camera sees, not buried in the middle of the assembly.
             cylinderBetween3(
-                add(eye, scale(side, radius * 0.30f * sgn)),
-                add(eye, scale(side, radius * 0.40f * sgn)),
-                radius = radius * 0.80f,
+                add(eye, scale(side, radius * 0.17f * sgn)),
+                add(eye, scale(side, radius * 0.23f * sgn)),
+                radius = radius * 0.70f,
             )
             program.setModel(model, NEON[0], NEON[1], NEON[2],
-                             specular = 1f, shininess = 128f, rim = 1f)
+                             specular = 1f, shininess = 128f, rim = NEON_RIM)
             cyl.draw(program)
         }
     }
@@ -524,25 +524,25 @@ class SceneRenderer(
 
         // Load-bearing boss, narrow, spanning the fork gap.
         cylinderBetween3(
-            sub(p, scale(side, radius * 0.55f)), add(p, scale(side, radius * 0.55f)),
-            radius = radius * 0.94f,
+            sub(p, scale(side, radius * 0.50f)), add(p, scale(side, radius * 0.50f)),
+            radius = radius * 0.84f,
         )
         program.setModel(model, 0.14f, 0.15f, 0.17f, specular = 0.6f, shininess = 56f)
         cyl.draw(program)
 
         // The pin, running right through and standing proud on both sides.
         cylinderBetween3(
-            sub(p, scale(side, radius * 1.35f)), add(p, scale(side, radius * 1.35f)),
-            radius = radius * 0.24f,
+            sub(p, scale(side, radius * 1.02f)), add(p, scale(side, radius * 1.02f)),
+            radius = radius * 0.20f,
         )
         program.setModel(model, 0.66f, 0.69f, 0.74f, specular = 1f, shininess = 120f, rim = 0.7f)
         cyl.draw(program)
 
         // Black cap on each end of the pin.
         listOf(-1f, 1f).forEach { sgn ->
-            val face = add(p, scale(side, radius * 1.35f * sgn))
+            val face = add(p, scale(side, radius * 1.02f * sgn))
             cylinderBetween3(
-                face, add(face, scale(side, radius * 0.10f * sgn)), radius = radius * 0.40f,
+                face, add(face, scale(side, radius * 0.06f * sgn)), radius = radius * 0.34f,
             )
             program.setModel(model, 0.05f, 0.05f, 0.06f, specular = 0.7f, shininess = 90f, rim = 0.3f)
             cyl.draw(program)
@@ -563,7 +563,7 @@ class SceneRenderer(
             val c = add(podAt, scale(podOut, t))
             cylinderBetween3(
                 sub(c, scale(side, 0.004f)), add(c, scale(side, 0.004f)),
-                radius = radius * (POD_RADIUS + 0.16f),
+                radius = radius * (POD_RADIUS + 0.06f),
             )
             program.setModel(model, 0.34f, 0.36f, 0.40f, specular = 0.85f, shininess = 84f, rim = 0.5f)
             cyl.draw(program)
@@ -575,7 +575,7 @@ class SceneRenderer(
             podEnd, add(podEnd, scale(side, -radius * 0.10f)), radius = radius * (POD_RADIUS - 0.06f),
         )
         program.setModel(model, NEON[0], NEON[1], NEON[2],
-                         specular = 1f, shininess = 128f, rim = 1f)
+                         specular = 1f, shininess = 128f, rim = NEON_RIM)
         cyl.draw(program)
     }
 
@@ -759,7 +759,7 @@ class SceneRenderer(
             )
             program.setModel(
                 model, ACCENT[0], ACCENT[1], ACCENT[2],
-                specular = 1f, shininess = 110f, rim = 1f,
+                specular = 1f, shininess = 110f, rim = NEON_RIM,
             )
             cyl.draw(program)
 
@@ -1099,7 +1099,7 @@ class SceneRenderer(
             )
             program.setModel(
                 model, ACCENT[0], ACCENT[1], ACCENT[2],
-                specular = 1f, shininess = 110f, rim = 1f,
+                specular = 1f, shininess = 110f, rim = NEON_RIM,
             )
             cyl.draw(program)
 
@@ -1177,7 +1177,7 @@ class SceneRenderer(
         cylinderBetween3(bodyEnd, collar, radius = PUMP_TUBE_R * 1.85f)
         program.setModel(
             model, ACCENT[0], ACCENT[1], ACCENT[2],
-            specular = 1f, shininess = 110f, rim = 1f,
+            specular = 1f, shininess = 110f, rim = NEON_RIM,
         )
         cyl.draw(program)
 
@@ -1658,7 +1658,17 @@ class SceneRenderer(
          * a glow. Kept just off pure cyan so it kicks against the cool white shell rather than
          * blending into it.
          */
-        val NEON = floatArrayOf(0.35f, 0.94f, 1.00f)
+        val NEON = floatArrayOf(0.20f, 0.58f, 0.68f)
+
+        /**
+         * Rim weight for the lights (change 41).
+         *
+         * They were drawn at a full 1.0, which drives the fresnel term to its maximum on every
+         * grazing pixel and blows the ring out to near-white -- the pigment underneath stops
+         * mattering at all. Dimming only the colour would not have fixed that; the rim is the
+         * half doing the shouting. Both come down together here.
+         */
+        const val NEON_RIM = 0.55f
 
         /** Legacy alias: the pump and vessel lights use the same neon. */
         val ACCENT = NEON
@@ -1683,11 +1693,18 @@ class SceneRenderer(
         /** How far each fork plate stands off the centreline, in limb radii. */
         const val LIMB_FORK_GAP = 0.92f
 
-        /** Actuator pod: offset from the pivot, length and radius, all in joint radii. */
-        const val POD_OFFSET = 1.55f
-        const val POD_LENGTH = 1.05f
-        const val POD_RADIUS = 0.62f
-        const val POD_FINS = 4
+        /**
+         * Actuator pod: offset from the pivot, length and radius, all in joint radii.
+         *
+         * Change 41 pulled it in hard. At 1.55 out and 1.05 long it was a drum cantilevered off
+         * the side of every axis -- the pod had become the widest thing on the machine and the
+         * arm read as knuckly. A drive housing on a real arm is a shallow disc sitting close in
+         * against the casting; it wants to be legible, not massive.
+         */
+        const val POD_OFFSET = 0.92f
+        const val POD_LENGTH = 0.40f
+        const val POD_RADIUS = 0.46f
+        const val POD_FINS = 3
 
         /** Fraction of the ram that is barrel rather than exposed rod. */
         const val RAM_BARREL = 0.52f
