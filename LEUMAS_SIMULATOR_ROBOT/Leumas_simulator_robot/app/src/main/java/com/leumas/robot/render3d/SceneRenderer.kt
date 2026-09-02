@@ -78,7 +78,7 @@ class SceneRenderer(
         limb = Mesh.frustum(topRadius = 0.50f, bottomRadius = 0.42f, segments = 64)
         // A strong taper for the pedestal column (change 42). Used both ways up:
         // narrow-end-first for the column, wide-end-first for the flare under the bearing.
-        column = Mesh.frustum(topRadius = 0.50f, bottomRadius = 0.64f, segments = 64)
+        column = Mesh.frustum(topRadius = 0.50f, bottomRadius = 0.64f, segments = 96)
         heap = Mesh.frustum(topRadius = 0.18f, bottomRadius = 0.50f, segments = 44)
         // Hopper cone: wide at the top, tapering to the dispenser inlet (change 15.1).
         hopper = Mesh.frustum(topRadius = 0.50f, bottomRadius = 0.15f, segments = 56)
@@ -268,8 +268,21 @@ class SceneRenderer(
         // below y=0.45, which is where the turret casting starts.
 
         // Footplate, overlapping the carriage top by 0.010 so there is no daylight under it.
+        // Change 43 refinished the whole pedestal. The geometry was right but the MATERIALS
+        // were left over from when this was two grey boxes: specular 0.15-0.6 and shininess 14-64,
+        // against an arm running specular 1.0 at shininess 128. Under the Fresnel-weighted
+        // highlight in the shader that difference is enormous -- the arm's surfaces gather a
+        // moving highlight and read as machined, while the base gathered almost none and read as
+        // matte plastic no matter how well it was modelled. Every part below is now finished on
+        // the same scale as the arm, which is all "make the base match" actually required.
         modelBox(cx, 0.132f, 0f, 0.380f, 0.044f, 0.360f)
-        program.setModel(model, 0.16f, 0.17f, 0.19f, specular = 0.30f, shininess = 26f)
+        program.setModel(model, 0.16f, 0.17f, 0.19f, specular = 0.80f, shininess = 74f, rim = 0.35f)
+        box.draw(program)
+
+        // Chamfer along the footplate's top edge. A cast plate is never a sharp-cornered slab, and
+        // the extra edge gives the light something to catch along the whole perimeter.
+        modelBox(cx, 0.157f, 0f, 0.352f, 0.014f, 0.332f)
+        program.setModel(model, 0.19f, 0.20f, 0.23f, specular = 0.85f, shininess = 84f, rim = 0.4f)
         box.draw(program)
 
         // Anchor bolts at the four corners: washer, then head. The single clearest signal that a
@@ -289,8 +302,15 @@ class SceneRenderer(
 
         // Plinth.
         modelBox(cx, 0.180f, 0f, 0.320f, 0.062f, 0.300f)
-        program.setModel(model, 0.21f, 0.23f, 0.26f, specular = 0.35f, shininess = 30f)
+        program.setModel(model, 0.21f, 0.23f, 0.26f, specular = 0.85f, shininess = 82f, rim = 0.4f)
         box.draw(program)
+
+        // Fillet where the column grows out of the plinth: castings are filleted at every change
+        // of section, and a hard butt joint between a box and a cone is the one place this
+        // assembly still looked assembled from primitives.
+        cylinderBetween(cx, 0.208f, 0f, cx, 0.220f, 0f, radius = 0.158f)
+        program.setModel(model, 0.20f, 0.22f, 0.25f, specular = 0.9f, shininess = 92f, rim = 0.4f)
+        cyl.draw(program)
 
         // Nameplate on the plinth's front face.
         modelBox(cx, 0.182f, 0.152f, 0.100f, 0.030f, 0.006f)
@@ -302,13 +322,13 @@ class SceneRenderer(
         frustumBetween(
             floatArrayOf(cx, 0.205f, 0f), floatArrayOf(cx, 0.360f, 0f), radius = 0.118f,
         )
-        program.setModel(model, 0.23f, 0.25f, 0.28f, specular = 0.55f, shininess = 52f, rim = 0.35f)
+        program.setModel(model, 0.23f, 0.25f, 0.28f, specular = 1f, shininess = 118f, rim = 0.45f)
         column.draw(program)
 
         // Gussets: two crossed fins, standing about 0.02 proud of the taper.
         listOf(45f, 135f).forEach { deg ->
             modelBox(cx, 0.268f, 0f, 0.320f, 0.110f, 0.020f, yawDeg = deg)
-            program.setModel(model, 0.19f, 0.21f, 0.24f, specular = 0.45f, shininess = 40f)
+            program.setModel(model, 0.19f, 0.21f, 0.24f, specular = 0.85f, shininess = 86f, rim = 0.4f)
             box.draw(program)
         }
 
@@ -316,26 +336,26 @@ class SceneRenderer(
         frustumBetween(
             floatArrayOf(cx, 0.400f, 0f), floatArrayOf(cx, 0.358f, 0f), radius = 0.118f,
         )
-        program.setModel(model, 0.25f, 0.27f, 0.30f, specular = 0.6f, shininess = 56f, rim = 0.4f)
+        program.setModel(model, 0.25f, 0.27f, 0.30f, specular = 1f, shininess = 118f, rim = 0.5f)
         column.draw(program)
 
         // Junction box on the back flank, with a conduit into the column. A powered machine has to
         // be fed from somewhere, and on a robot that somewhere is always the pedestal.
         modelBox(cx, 0.252f, -0.176f, 0.150f, 0.130f, 0.058f)
-        program.setModel(model, 0.15f, 0.16f, 0.18f, specular = 0.4f, shininess = 36f)
+        program.setModel(model, 0.15f, 0.16f, 0.18f, specular = 0.8f, shininess = 78f, rim = 0.35f)
         box.draw(program)
         modelBox(cx, 0.292f, -0.207f, 0.086f, 0.010f, 0.004f)
         program.setModel(model, NEON[0], NEON[1], NEON[2],
                          specular = 1f, shininess = 128f, rim = NEON_RIM)
         box.draw(program)
         cylinderBetween(cx, 0.232f, -0.150f, cx, 0.232f, -0.096f, radius = 0.019f)
-        program.setModel(model, 0.13f, 0.13f, 0.15f, specular = 0.4f, shininess = 34f)
+        program.setModel(model, 0.13f, 0.13f, 0.15f, specular = 0.75f, shininess = 70f, rim = 0.3f)
         cyl.draw(program)
 
         // ---- the slewing bearing, the A1 axis -----------------------------------------------
         // Outer race, sized to the flare beneath it so nothing overhangs unsupported.
         cylinderBetween(cx, 0.398f, 0f, cx, 0.428f, 0f, radius = 0.152f)
-        program.setModel(model, 0.26f, 0.28f, 0.31f, specular = 0.7f, shininess = 64f, rim = 0.4f)
+        program.setModel(model, 0.26f, 0.28f, 0.31f, specular = 1f, shininess = 124f, rim = 0.5f)
         cyl.draw(program)
 
         // Lit band round the housing, marking the axis.
@@ -1242,6 +1262,33 @@ class SceneRenderer(
         dispense: FloatArray,
         payload: Payload,
     ): FloatArray {
+        // ---- THE PUMP'S OWN FRAME (change 43) -----------------------------------------------
+        //
+        // THIS is why beads came off the pump and hung in free space.
+        //
+        // The head's race lies along `side`, and every part that rings it -- rollers, cover bolts,
+        // the tube -- was placed as `out*cos(theta) + axis*sin(theta)`. For that ring to be a
+        // circle in the race's own face, BOTH basis vectors have to be perpendicular to `side`.
+        // `out` is, by construction: it is cross(axis, side). **`axis` is not.** `axis` is hard
+        // world-up, while `side` is rolled about the forearm by the wrist (A4) in
+        // drawEndEffector -- so the moment the wrist rolls with a non-horizontal forearm, `side`
+        // picks up a vertical component and stops being perpendicular to up.
+        //
+        // The ring was then drawn in a plane TILTED out of the race's face. Near theta = +/-90
+        // degrees, where the `axis` term dominates, that tilt pushes parts along the race axis and
+        // straight out through its end caps -- so a handful of rollers popped outside the housing
+        // and floated beside the pump, and the bolt circle slid off the cover plate. It depended
+        // on wrist roll, which is exactly why it only happened SOMETIMES.
+        //
+        // Gram-Schmidt fixes it at the root: take the component of `axis` perpendicular to the
+        // race axis and use that. `pumpUp` and `pumpOut` are then both square to `side`, the ring
+        // is a true circle in the cover face, and nothing on the head can leave the housing at any
+        // wrist angle. Everything downstream reads these two instead of `out`/`axis`.
+        val raceAxis = normalize(side)
+        val axisDotRace = axis[0] * raceAxis[0] + axis[1] * raceAxis[1] + axis[2] * raceAxis[2]
+        val pumpUp = normalize(sub(axis, scale(raceAxis, axisDotRace)))
+        val pumpOut = normalize(cross(pumpUp, raceAxis))
+
         // The head sits just below the hopper outlet, its rotor face turned toward the camera.
         val hub = add(inlet, scale(axis, -PUMP_RADIUS * 0.85f))
 
@@ -1269,8 +1316,8 @@ class SceneRenderer(
             // Bolt ring on the cover plate.
             for (i in 0 until PUMP_BOLTS) {
                 val a = i * (2f * Math.PI.toFloat() / PUMP_BOLTS)
-                val o = add(scale(out, cos(a) * PUMP_RADIUS * 0.74f),
-                            scale(axis, sin(a) * PUMP_RADIUS * 0.74f))
+                val o = add(scale(pumpOut, cos(a) * PUMP_RADIUS * 0.74f),
+                            scale(pumpUp, sin(a) * PUMP_RADIUS * 0.74f))
                 val c = add(face, o)
                 cylinderBetween3(c, add(c, scale(side, 0.010f * sgn)), radius = 0.006f)
                 program.setModel(model, 0.50f, 0.52f, 0.56f, specular = 0.85f, shininess = 78f)
@@ -1286,13 +1333,18 @@ class SceneRenderer(
         program.setModel(model, 0.16f, 0.16f, 0.18f, specular = 0.5f, shininess = 44f)
         cyl.draw(program)
 
-        // Three rollers, 120 degrees apart, turning with the dispenser.
+        // Three rollers, 120 degrees apart, turning with the dispenser. Their orbit is capped so
+        // the outermost point of a roller can never pass the housing wall: PUMP_ORBIT +
+        // PUMP_ROLLER_R must stay inside PUMP_RADIUS. It does (0.047 against 0.056), but the cap
+        // is written down rather than left as a coincidence between four separate constants --
+        // this is the mechanism that was escaping, and it should not be able to again.
+        val orbit = PUMP_ORBIT.coerceAtMost(PUMP_RADIUS * 0.94f - PUMP_ROLLER_R)
         val spin = Math.toRadians(payload.pumpAngle.toDouble()).toFloat()
         for (i in 0 until PUMP_ROLLERS) {
             val theta = spin + i * (2f * Math.PI.toFloat() / PUMP_ROLLERS)
             val offset = add(
-                scale(out, cos(theta) * PUMP_ORBIT),
-                scale(axis, sin(theta) * PUMP_ORBIT),
+                scale(pumpOut, cos(theta) * orbit),
+                scale(pumpUp, sin(theta) * orbit),
             )
             val centre = add(hub, offset)
             cylinderBetween3(
@@ -1314,7 +1366,7 @@ class SceneRenderer(
             val theta = (PUMP_TUBE_FROM + PUMP_TUBE_ARC * t) * Math.PI.toFloat()
             val point = add(
                 hub,
-                add(scale(out, cos(theta) * tubeR), scale(axis, sin(theta) * tubeR)),
+                add(scale(pumpOut, cos(theta) * tubeR), scale(pumpUp, sin(theta) * tubeR)),
             )
             cylinderBetween3(previous, point, radius = PUMP_TUBE_R)
             program.setModel(model, 0.86f, 0.88f, 0.90f, specular = 0.5f, shininess = 40f, alpha = 1f)
