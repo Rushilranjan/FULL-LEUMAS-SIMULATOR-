@@ -12,9 +12,13 @@
  * nothing else; the programs below are what actually decide the sizes. */
 #define SS1_MAX_FEEDERS   3u
 #define SS1_MAX_BLENDERS  2u
-/* Change 31: a program may now have more than one packaging station, because
- * sequence 5 runs the solid and liquid lines together and each line ships out
- * of its own module onto its own exit run. */
+/* A program may have more than one packaging station, so both production lines
+ * could ship independently in one sequence (change 31).
+ *
+ * NO SEQUENCE USES THIS TODAY -- the one that did, sequence 5, was removed in
+ * change 33. The machinery is kept because it is correct and verified and the
+ * combined sequence may come back; what is NOT kept is any comment claiming a
+ * program exercises it. Every current program has pack_count 1. */
 #define SS1_MAX_PACKS     2u
 
 /* A LINE is a status run. Every feeder on one fills from the same base pixel,
@@ -22,8 +26,11 @@
  * recharge animator. The rig has two -- the solid line fills from 0, the liquid
  * line from 22 -- and being disjoint, the two CAN animate at the same time.
  *
- * Change 32 gave each line its own animator for that reason: sequence 5 runs
- * both lines and has to charge them together, not one after the other. */
+ * Change 32 gave each line its own animator so both could charge at once. As
+ * with SS1_MAX_PACKS, the sequence that needed it is gone (change 33) and every
+ * current program has all its feeders on ONE line, so the second animator sits
+ * idle -- but per-line ownership is still the correct model, and it is what
+ * stops a recharge on one line disturbing the other if that ever changes. */
 #define SS1_MAX_LINES     2u
 #define SS1_LINE_SOLID    0u
 #define SS1_LINE_LIQUID   1u
@@ -207,19 +214,15 @@ _Static_assert(SS1_LMACRO_CHARGE_MS < SS1_T_CARRY,
 _Static_assert(SS1_LMACRO1_CHARGE_MS == SS1_LMACRO_CHARGE_MS,
                "the two liquid macros must recharge in step");
 
-/* Change 31: sequence 5 runs both lines, so a program can have two packaging
- * stations and three feeders at once. These are the array bounds every program
- * is indexed against. */
-_Static_assert(SS1_MAX_PACKS >= 2u,
-               "sequence 5 needs two packaging stations");
+/* The array bounds every program is indexed against. */
 _Static_assert(SS1_MAX_FEEDERS >= 3u,
-               "sequences 2 and 5 need three feeders");
+               "sequence 2 needs three feeders");
 _Static_assert(SS1_MAX_BLENDERS >= 2u,
-               "sequences 2, 4 and 5 need two blenders");
+               "sequences 2 and 4 need two blenders");
 
-/* The solid and liquid exit runs must not overlap: in sequence 5 they can be
- * animating at the same time, on separate animators, and an overlap would have
- * them fighting over the same pixels with no arbitration at all. */
+/* The solid and liquid exit runs must not overlap. Nothing ships on both at
+ * once today, but the pack stations animate on separate animators with no
+ * arbitration between them, so an overlap would be a silent pixel fight. */
 _Static_assert(SOLID_EXIT_B < LIQUID_EXIT_A || LIQUID_EXIT_B < SOLID_EXIT_A,
                "the two exit runs must be disjoint to ship concurrently");
 
@@ -349,11 +352,12 @@ typedef struct {
     uint8_t               carries_per_cycle;
     const Ss1PackSpec    *packs;
     uint8_t               pack_count;
-    /* How many station shipments make ONE lot. This is 1 everywhere except
-     * sequence 5, where a lot is not finished until BOTH lines have shipped --
-     * see the note on SEQ5. Getting this wrong does not merely miscount: the
-     * app derives its cycle display from LOT:DONE, and S_ARM_DONE waits on
-     * s_lots reaching SS1_CYCLES, so a double count would end the run early. */
+    /* How many station shipments make ONE lot. It is 1 in every current program,
+     * and would only exceed that for a sequence running both lines at once,
+     * where a lot is not finished until both have shipped. Getting it wrong
+     * does not merely miscount: the app derives its cycle display from
+     * LOT:DONE, and S_ARM_DONE waits on s_lots reaching SS1_CYCLES, so a double
+     * count would end the run early. */
     uint8_t               lot_ships;
 } Ss1Program;
 
@@ -453,63 +457,6 @@ static const Ss1CarrySpec SEQ4_CARRIES[] = {
     { 1u, 1u },   /* liquid macro 2 -> vessel 2 */
 };
 
-/* ---- sequence 5: both lines at once --------------------------------------
- * Sequence 1 and sequence 3, exactly as they are, running together:
- *
- *     macro 2 + gravimetric -> blender 2 -> packaging  -> solid exit  17..21
- *     liquid macro 2        -> vessel 2  -> bottling   -> liquid exit 39..43
- *
- * Same modules, same positions, same recharge rates as those two sequences use
- * on their own. Nothing here is a new component; the only new thing is that
- * both lines are alive at the same time.
- *
- * THE ARM IS THE ONLY SERIAL PART, which is what makes this work at all. It
- * runs three carries per cycle -- two for the solid batch, one for the liquid --
- * back to back at SS1_T_CARRY, and the two plants close their batches
- * underneath it. Neither line ever waits for the other:
- *
- *   carry 1   macro 2      -> blender 2     blender has 1 of 2
- *   carry 2   gravimetric  -> blender 2     blender full, starts blending
- *   carry 3   liquid macro -> vessel 2      vessel full, starts filling
- *
- * A LOT IS BOTH LINES. Packaging and bottling each ship once per cycle, and
- * lot_ships = 2 makes LOT:DONE wait for the pair -- so four cycles still means
- * four lots, the app's cycle display still counts right, and the run still ends
- * when it should. This is the only program where that number is not 1.
- *
- * TIMING IS THE LOOSEST OF ALL FIVE, because three carries per cycle means
- * every feeder is collected once every 126 s rather than every 42 or 84:
- *
- *     macro 2       recharge  8.56 s     gravimetric  11.2 s
- *     liquid macro  recharge 10.0  s     window      126 s
- *
- * The two lines share the ONE recharge animator, and that is safe here for a
- * reason worth writing down: the solid feeders fill from pixel 0 and the liquid
- * feeder from pixel 22, so their spans are disjoint and could in principle play
- * together -- but each recharge is triggered by its own carry, and carries are
- * 42 s apart, so they never even ask to. The two hand-off animators are the
- * same story from the other side: blender 2 -> packaging is 13..16 and
- * vessel 2 -> bottling is 35..38, disjoint spans that the shared animator will
- * serialise if they ever coincide, and BL_READY waits green while it does. */
-static const Ss1FeederSpec SEQ5_FEEDERS[] = {
-    { SS1_SLOT_MACRO,       SS1_CHARGE_FILL_MACRO_MS  },
-    { SS1_SLOT_GRAVIMETRIC, SS1_CHARGE_FILL_GRAV_MS   },
-    { SS1_SLOT_LMACRO2,     SS1_CHARGE_FILL_LIQUID_MS },
-};
-static const Ss1BlenderSpec SEQ5_BLENDERS[] = {
-    { SS1_SLOT_BLENDER, 2u, 0u },   /* solid:  macro + gravimetric  -> pack 0 */
-    { SS1_SLOT_VESSEL2, 1u, 1u },   /* liquid: one dose is a batch  -> pack 1 */
-};
-static const Ss1CarrySpec SEQ5_CARRIES[] = {
-    { 0u, 0u },   /* macro 2      -> blender 2 */
-    { 1u, 0u },   /* gravimetric  -> blender 2 */
-    { 2u, 1u },   /* liquid macro -> vessel 2  */
-};
-static const Ss1PackSpec SEQ5_PACKS[] = {
-    { SS1_SLOT_PACKAGING, 1u, SOLID_EXIT_A,  SOLID_EXIT_B  },
-    { SS1_SLOT_BOTTLING,  1u, LIQUID_EXIT_A, LIQUID_EXIT_B },
-};
-
 static const Ss1Program SS_PROGRAMS[SOLID_SEQ_COUNT] = {
     {
         .number = 1u,
@@ -538,13 +485,6 @@ static const Ss1Program SS_PROGRAMS[SOLID_SEQ_COUNT] = {
         .blenders = SEQ4_BLENDERS, .blender_count = 2u,
         .carries = SEQ4_CARRIES,   .carries_per_cycle = 2u,
         .packs = SEQ4_PACKS, .pack_count = 1u, .lot_ships = 1u,
-    },
-    {
-        .number = 5u,
-        .feeders = SEQ5_FEEDERS,   .feeder_count  = 3u,
-        .blenders = SEQ5_BLENDERS, .blender_count = 2u,
-        .carries = SEQ5_CARRIES,   .carries_per_cycle = 3u,
-        .packs = SEQ5_PACKS, .pack_count = 2u, .lot_ships = 2u,
     },
 };
 
@@ -680,11 +620,10 @@ static uint8_t s_flow_xfer_owner = SS1_NO_OWNER;
  * globals, which is precisely why only one line could ship at a time.
  *
  * Each station owns its OWN exit-run animator. That is not tidiness -- the two
- * exit runs are disjoint spans (17..21 and 39..43) and in sequence 5 they can
- * genuinely be shipping at the same time, so sharing one animator would make
- * one line wait on the other for no physical reason. Contrast the blender
- * hand-off animator below, which is shared on purpose because those spans
- * overlap and truly cannot both play. */
+ * exit runs are disjoint spans (17..21 and 39..43), so were both lines ever
+ * shipping at once, sharing one animator would make one wait on the other for
+ * no physical reason. Contrast the blender hand-off animator below, which is
+ * shared on purpose because those spans overlap and truly cannot both play. */
 typedef struct {
     Ss1PackPhase phase;
     uint8_t   slot;
@@ -948,8 +887,8 @@ static void feeder_recharge(Ss1Feeder *f)
      *
      * Change 32: only feeders on the SAME line are evicted. Before there was
      * one animator for the rig, so a solid recharge would knock a liquid feeder
-     * out of its own animation even though their pixels never touch -- which is
-     * precisely the interference sequence 5 would have suffered. */
+     * out of its own animation even though their pixels never touch. No current
+     * program mixes lines, but the narrower rule is the correct one. */
     for (uint8_t i = 0u; i < s_prog->feeder_count; i++) {
         if (&s_feeder[i] != f && s_feeder[i].line == f->line
             && s_feeder[i].phase == FD_CHARGING) {
@@ -1325,9 +1264,8 @@ static void enter_step(Ss1Step s)
      * which is the order the sequence itself first collects them. */
     /* Change 32: EVERY line starts priming at once. Within a line the feeders
      * still go in program order, because their spans overlap; between lines
-     * they are disjoint and run together, so in sequence 5 the solid and liquid
-     * macros fill side by side and finish together rather than the liquid line
-     * waiting out the whole solid line first. */
+     * they are disjoint and run together. Every current program is single-line,
+     * so today exactly one line has anything to prime. */
     case S_PRIME:
         for (uint8_t l = 0u; l < SS1_MAX_LINES; l++) {
             s_prime[l] = next_feeder_on_line(l, SS1_NO_FEEDER);

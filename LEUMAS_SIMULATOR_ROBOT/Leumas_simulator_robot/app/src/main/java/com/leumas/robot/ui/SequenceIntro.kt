@@ -296,7 +296,10 @@ private fun RecipeCard(recipe: Recipe, modifier: Modifier = Modifier) {
                 )
                 .padding(horizontal = 30.dp, vertical = 22.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            // Change 33: the spacing is per-child now rather than one uniform gap. The name
+            // belongs to the heading above it and the chain is a separate thought, so an even
+            // 14 dp between all three would have grouped them wrongly.
+            verticalArrangement = Arrangement.Top,
         ) {
             Text(
                 text = "RECIPE RECEIVED",
@@ -306,6 +309,24 @@ private fun RecipeCard(recipe: Recipe, modifier: Modifier = Modifier) {
                 fontFamily = FontFamily.Monospace,
                 letterSpacing = 2.sp,
                 textAlign = TextAlign.Center,
+            )
+
+            // The recipe's NAME, which the card never showed before change 33 -- it went straight
+            // from the heading to the process chain, so the thing the operator selected with the
+            // button was the one thing not on screen.
+            //
+            // Slightly smaller than the heading and equally bold, with the SAME letterSpacing:
+            // monospace centres on advance width, so two centred lines at different tracking sit
+            // visibly off each other's axis. Matching it is what makes them line up.
+            Text(
+                text = recipe.name,
+                color = LeumasColors.OnSurface,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                letterSpacing = 2.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 8.dp),
             )
 
             // The PROCESS, stage by stage -- not the slot list.
@@ -323,6 +344,7 @@ private fun RecipeCard(recipe: Recipe, modifier: Modifier = Modifier) {
                 fontFamily = FontFamily.Monospace,
                 letterSpacing = 1.sp,
                 textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 18.dp),
             )
         }
     }

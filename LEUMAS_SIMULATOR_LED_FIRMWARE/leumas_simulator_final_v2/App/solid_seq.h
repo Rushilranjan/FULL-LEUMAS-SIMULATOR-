@@ -43,19 +43,11 @@
  *                was dark in every run. The two lines share nothing, so its
  *                timing is the most relaxed of the four.
  *
- *   SEQUENCE 5   BOTH LINES AT ONCE -- sequence 1 and sequence 3 together,
- *                same modules and same positions:
- *                    macro 2 + gravimetric -> blender 2 -> packaging
- *                    liquid macro 2        -> vessel 2  -> bottling
- *                Three carries per cycle, one batch on each line, and a lot is
- *                the PAIR: packaging and bottling each ship once per cycle and
- *                LOT:DONE waits for both. The arm is the only serial part, so
- *                the two plants close their batches underneath it and neither
- *                line ever waits for the other. Its timing is the loosest of
- *                the five, because three carries per cycle gives every feeder
- *                126 s to recharge.
+ * All four run SS1_CYCLES cycles and then park. None ever starts another.
  *
- * All five run SS1_CYCLES cycles and then park. None ever starts another.
+ * Change 33 removed a fifth that ran both lines together. The engine kept the
+ * machinery it needed -- several packaging stations, one recharge animator per
+ * line -- because it is correct and verified; no current program uses it.
  *
  * ---------------------------------------------------------------------------
  * SHAPE — concurrent actors, not one queue
@@ -110,7 +102,7 @@
 #include <stdbool.h>
 
 /* How many sequences the board knows. Selection cycles through 1..this. */
-#define SOLID_SEQ_COUNT   5u
+#define SOLID_SEQ_COUNT   4u
 
 typedef enum {
     SS1_IDLE = 0,    /* never started, or stopped                             */

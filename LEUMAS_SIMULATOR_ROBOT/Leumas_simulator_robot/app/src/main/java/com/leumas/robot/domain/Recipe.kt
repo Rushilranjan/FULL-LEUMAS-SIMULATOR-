@@ -22,9 +22,10 @@ data class RecipeStage(
  * MCU stays the sole source of truth for *when* anything happens.
  *
  * Mirrors `App/solid_seq.c` and the `SS1_*` constants in `Core/Inc/config.h`. Change 20 turned
- * that file into a small engine driven by a per-sequence table, so there are five sequences and
- * the board button cycles between them: two on the solid line, two on the liquid line, and one
- * (change 31) that runs both at once.
+ * that file into a small engine driven by a per-sequence table, so there are four sequences and
+ * the board button cycles between them: two on the powder line and two on the liquid line.
+ * Change 33 named them POWDER X / X2 and LIQUID X / X2, and removed a fifth that ran both lines
+ * together.
  */
 data class Recipe(
     val sequence: Int,
@@ -107,25 +108,6 @@ data class Recipe(
          * Unlike sequence 2 the two lines share nothing, so there is no module collected twice in a
          * cycle and the timing is the most relaxed of the four.
          */
-        /**
-         * Sequence 5 runs BOTH LINES AT ONCE: sequence 1 and sequence 3 together, on exactly the
-         * same modules and positions those two use on their own.
-         *
-         *     macro 2 + gravimetric -> blender 2 -> packaging   (solid exit run)
-         *     liquid macro 2        -> vessel 2  -> bottling    (liquid exit run)
-         *
-         * Written as three stages with both lines on each, because the two run concurrently: the
-         * arm is the only serial part, taking three carries a cycle, while the two plants close
-         * their batches underneath it. A lot is the PAIR -- packaging and bottling each ship once
-         * per cycle and the firmware holds LOT:DONE until both are in -- so the cycle bar still
-         * counts four lots over four cycles exactly as every other sequence does.
-         */
-        private val SS5_STAGES = listOf(
-            RecipeStage("MACRO 2 + GRAVIMETRIC / LIQUID MACRO 2", listOf(2, 3, 8)),
-            RecipeStage("BLENDER 2 / VESSEL 2", listOf(5, 10)),
-            RecipeStage("PACKAGING / BOTTLING", listOf(6, 11)),
-        )
-
         private val SS4_STAGES = listOf(
             RecipeStage("LIQUID MACRO 1 + 2", listOf(7, 8)),
             RecipeStage("VESSEL 1 + 2", listOf(9, 10)),
@@ -135,7 +117,7 @@ data class Recipe(
         val ALL: Map<Int, Recipe> = linkedMapOf(
             1 to Recipe(
                 sequence = 1,
-                name = "SOLID SEQUENCE 1",
+                name = "POWDER X",
                 lesson = "Four cycles: macro and gravimetric are blended, packaged and shipped, " +
                     "with the feeders recharging in the gaps.",
                 line = ProductionLine.SOLID,
@@ -144,7 +126,7 @@ data class Recipe(
             ),
             2 to Recipe(
                 sequence = 2,
-                name = "SOLID SEQUENCE 2",
+                name = "POWDER X2",
                 lesson = "Four cycles on the whole solid line: two blend lines run in parallel " +
                     "sharing one gravimetric, and packaging ships a lot once both are in.",
                 line = ProductionLine.SOLID,
@@ -153,7 +135,7 @@ data class Recipe(
             ),
             3 to Recipe(
                 sequence = 3,
-                name = "LIQUID SEQUENCE 3",
+                name = "LIQUID X",
                 lesson = "Four cycles on the liquid line: one dose from the liquid macro fills " +
                     "the vessel, which feeds bottling and ships out on the liquid exit run.",
                 line = ProductionLine.LIQUID,
@@ -162,32 +144,19 @@ data class Recipe(
             ),
             4 to Recipe(
                 sequence = 4,
-                name = "LIQUID SEQUENCE 4",
+                name = "LIQUID X2",
                 lesson = "Four cycles on the whole liquid line: two dosing lines run in parallel, " +
                     "and bottling ships a lot once both vessels are in.",
                 line = ProductionLine.LIQUID,
                 stages = SS4_STAGES,
                 activeSlots = listOf(7, 8, 9, 10, 11),
             ),
-            5 to Recipe(
-                sequence = 5,
-                name = "COMBINED SEQUENCE 5",
-                lesson = "Four cycles with BOTH lines running together: the solid line blends and " +
-                    "packages while the liquid line fills and bottles, and a lot ships only once " +
-                    "both have.",
-                // Both lines run, and the type has only the two values. SOLID is the arm's first
-                // carry of every cycle and the line the run opens on, so it is the less misleading
-                // of the two -- but nothing downstream should be reading this for sequence 5.
-                line = ProductionLine.SOLID,
-                stages = SS5_STAGES,
-                activeSlots = listOf(2, 3, 5, 6, 8, 10, 11),
-            ),
         )
 
         /**
          * Recipe for a sequence number, or null if the MCU announced one we do not know.
          *
-         * Sequences 1 to 5 exist in the firmware; the board button cycles between them and
+         * Sequences 1 to 4 exist in the firmware; the board button cycles between them and
          * announces the choice with `RECIPE:<n>`. An unknown number is shown as-is elsewhere
          * rather than discarded, but there is no card to draw for it.
          */
